@@ -1,0 +1,291 @@
+import { Router, Request, Response } from 'express';
+import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
+import { getDb } from '../db/index.js';
+import { getMockNAV, getMockFunds } from '../adapters/eastmoney.js';
+import { scoreFund } from '../services/scoring.js';
+
+// ============================================================
+// 持仓数据类型
+// ============================================================
+
+interface PortfolioRow {
+  id: number;
+  code: string;
+  name: string;
+  amount: number;
+  cost_nav: number;
+  shares: number;
+  added_at: string;
+}
+
+interface PortfolioHolding {
+  id: number;
+  code: string;
+  name: string;
+  amount: number;
+  costNav: number;
+  shares: number;
+  currentNav: number;
+  currentValue: number;
+  pnl: number;
+  pnlPercent: number;
+  score: FundScore;
+  signal: SignalResult;
+  addedAt: string;
+}
+
+// ============================================================
+// 交易信号生成
+// ============================================================
+
+function getSignal(totalScore: number): SignalResult {
+  if (totalScore >= 80) {
+    return { signal: 'buy', score: totalScore, reason: '综合评分优秀，建议买入', suggestedPosition: '10%-20%' };
+  }
+  if (totalScore >= 60) {
+    return { signal: 'hold', score: totalScore, reason: '综合评分良好，建议持有', suggestedPosition: '维持现有仓位' };
+  }
+  if (totalScore >= 40) {
+    return { signal: 'reduce', score: totalScore, reason: '综合评分偏低，建议减持', suggestedPosition: '减持30%-50%' };
+  }
+  return { signal: 'sell', score: totalScore, reason: '综合评分较差，建议清仓', suggestedPosition: '全部卖出' };
+}
+
+const router = Router();
+
+// ============================================================
+// POST /api/portfolio/add — 添加或追加持仓
+// ============================================================
+
+router.post('/portfolio/add', (req: Request, res: Response) => {
+  try {
+    const { code, name, amount, costNav } = req.body;
+
+    if (!code || !name || amount == null || costNav == null) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: '缺少必填字段: code, name, amount, costNav',
+        timestamp: new Date().toISOString(),
+      };
+      res.status(400).json(body);
+      return;
+    }
+
+    const shares = amount / costNav;
+    const db = getDb();
+
+    // 检查是否已存在同名基金
+    const existing = db
+      .prepare('SELECT id, amount, shares FROM portfolio WHERE code = ?')
+      .get(code) as { id: number; amount: number; shares: number } | undefined;
+
+    // 确保基金基础信息已写入 funds 表（满足外键约束）
+    db.prepare(`
+      INSERT INTO funds (code, name, updated_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(code) DO NOTHING
+    `).run(code, name);
+
+    if (existing) {
+      // 追加仓位
+      const newAmount = existing.amount + amount;
+      const newShares = existing.shares + shares;
+      const newCostNav = newAmount / newShares;
+
+      db.prepare('UPDATE portfolio SET amount = ?, shares = ?, cost_nav = ?, name = ? WHERE id = ?').run(
+        newAmount,
+        newShares,
+        newCostNav,
+        name,
+        existing.id,
+      );
+
+      const body: ApiResponse<{ holding: { id: number; code: string; name: string; amount: number; costNav: number; shares: number; addedAt: string } }> = {
+        success: true,
+        data: {
+          holding: {
+            id: existing.id,
+            code,
+            name,
+            amount: Math.round(newAmount * 100) / 100,
+            costNav: Math.round(newCostNav * 10000) / 10000,
+            shares: Math.round(newShares * 100) / 100,
+            addedAt: new Date().toISOString(),
+          },
+        },
+        timestamp: new Date().toISOString(),
+      };
+      res.json(body);
+    } else {
+      // 新建仓位
+      const result = db
+        .prepare('INSERT INTO portfolio (code, name, amount, cost_nav, shares) VALUES (?, ?, ?, ?, ?)')
+        .run(code, name, amount, costNav, shares);
+
+      const body: ApiResponse<{ holding: { id: number; code: string; name: string; amount: number; costNav: number; shares: number; addedAt: string } }> = {
+        success: true,
+        data: {
+          holding: {
+            id: Number(result.lastInsertRowid),
+            code,
+            name,
+            amount,
+            costNav,
+            shares: Math.round(shares * 100) / 100,
+            addedAt: new Date().toISOString(),
+          },
+        },
+        timestamp: new Date().toISOString(),
+      };
+      res.json(body);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[portfolio] add error:', message);
+    const body: ApiResponse<never> = {
+      success: false,
+      error: message,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(500).json(body);
+  }
+});
+
+// ============================================================
+// DELETE /api/portfolio/:code — 移除持仓
+// ============================================================
+
+router.delete('/portfolio/:code', (req: Request, res: Response) => {
+  try {
+    const code = req.params.code as string;
+    const db = getDb();
+
+    const existing = db.prepare('SELECT id FROM portfolio WHERE code = ?').get(code);
+    if (!existing) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: `基金 ${code} 不在持仓列表中`,
+        timestamp: new Date().toISOString(),
+      };
+      res.status(404).json(body);
+      return;
+    }
+
+    db.prepare('DELETE FROM portfolio WHERE code = ?').run(code);
+
+    const body: ApiResponse<{ removed: string }> = {
+      success: true,
+      data: { removed: code },
+      timestamp: new Date().toISOString(),
+    };
+    res.json(body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[portfolio] delete error:', message);
+    const body: ApiResponse<never> = {
+      success: false,
+      error: message,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(500).json(body);
+  }
+});
+
+// ============================================================
+// GET /api/portfolio — 获取所有持仓（含实时评分与盈亏）
+// ============================================================
+
+router.get('/portfolio', (_req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare('SELECT * FROM portfolio ORDER BY added_at DESC').all() as PortfolioRow[];
+
+    const mockFunds = getMockFunds();
+    const fundMap = new Map(mockFunds.map((f) => [f.code, f]));
+
+    const holdings: PortfolioHolding[] = [];
+    let totalValue = 0;
+    let totalCost = 0;
+
+    for (const row of rows) {
+      const navData = getMockNAV(row.code);
+      const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+      const currentValue = row.shares * currentNav;
+      const pnl = currentValue - row.amount;
+      const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
+
+      // 从 mock 数据中查找基金信息用于评分，找不到则构造最小 FundInfo
+      let fundInfo: FundInfo;
+      const existing = fundMap.get(row.code);
+      if (existing) {
+        fundInfo = existing;
+      } else {
+        fundInfo = {
+          code: row.code,
+          name: row.name,
+          type: '',
+          manager: '',
+          tenure: '',
+          managerReturn: '',
+          scale: 0,
+          inception: '',
+          company: '',
+        };
+      }
+
+      const score = scoreFund(fundInfo, navData);
+      const signal = getSignal(score.total);
+
+      holdings.push({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        amount: row.amount,
+        costNav: row.cost_nav,
+        shares: row.shares,
+        currentNav,
+        currentValue: Math.round(currentValue * 100) / 100,
+        pnl: Math.round(pnl * 100) / 100,
+        pnlPercent: Math.round(pnlPercent * 100) / 100,
+        score,
+        signal,
+        addedAt: row.added_at,
+      });
+
+      totalValue += currentValue;
+      totalCost += row.amount;
+    }
+
+    const totalPnl = totalValue - totalCost;
+    const summaryPnlPercent = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+
+    const body: ApiResponse<{
+      holdings: PortfolioHolding[];
+      summary: { totalValue: number; totalCost: number; totalPnl: number; pnlPercent: number };
+    }> = {
+      success: true,
+      data: {
+        holdings,
+        summary: {
+          totalValue: Math.round(totalValue * 100) / 100,
+          totalCost: Math.round(totalCost * 100) / 100,
+          totalPnl: Math.round(totalPnl * 100) / 100,
+          pnlPercent: Math.round(summaryPnlPercent * 100) / 100,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    };
+    res.json(body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[portfolio] list error:', message);
+    const body: ApiResponse<never> = {
+      success: false,
+      error: message,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(500).json(body);
+  }
+});
+
+export default router;

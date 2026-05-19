@@ -60,5 +60,16 @@ function initSchema(db: Database.Database): void {
       FOREIGN KEY (fund_code) REFERENCES funds(code),
       UNIQUE(date, rank)
     );
+
+    CREATE TABLE IF NOT EXISTS portfolio (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      cost_nav REAL NOT NULL,
+      shares REAL NOT NULL,
+      added_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (code) REFERENCES funds(code)
+    );
   `);
 }
