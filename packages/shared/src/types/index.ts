@@ -63,9 +63,9 @@ export interface FundAnalysis extends FundInfo {
 // ============================================================
 
 export interface InvestAdvice {
-  pePercentile: number;   // PE 历史分位
-  multiplier: number;     // 定投倍数 (0 / 0.5 / 1.0 / 1.2-1.5 / 1.5-2.0)
-  strategy: string;       // 策略说明
+  pePercentile: number;       // PE 历史分位
+  multiplier: number;         // 本次定投倍数（服务层从范围中解析出的具体值）
+  strategy: string;           // 策略说明
 }
 
 // ============================================================
@@ -148,9 +148,6 @@ export interface MarketEvent {
 // API 通用响应
 // ============================================================
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  error?: string;
-  timestamp: string;
-}
+export type ApiResponse<T> =
+  | { success: true; data: T; timestamp: string }
+  | { success: false; error: string; timestamp: string };
