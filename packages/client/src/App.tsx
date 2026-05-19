@@ -1,67 +1,50 @@
-import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Routes, Route, NavLink } from 'react-router-dom';
+import RecommendPage from '@/pages/RecommendPage';
+import PortfolioPage from '@/pages/PortfolioPage';
+import { TrendingUp, Briefcase } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 function App() {
-  const [health, setHealth] = useState<{ status: string; uptime: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const checkHealth = () => {
-    setLoading(true);
-    setHealth(null);
-    setError(null);
-    fetch('/api/health')
-      .then(res => res.json())
-      .then((data) => {
-        if (data.success) {
-          setHealth(data.data);
-        } else {
-          setError(data.error || 'Unknown error');
-        }
-      })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { checkHealth(); }, []);
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardHeader>
-          <CardTitle>Allin</CardTitle>
-          <CardDescription>基金智能投资决策工具 v1.0</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between py-2 border-b">
-              <span className="text-muted-foreground">后端状态</span>
-              <span className={
-                loading ? 'text-muted-foreground' :
-                health ? 'text-green-600 font-medium' :
-                'text-red-600'
-              }>
-                {loading ? '⏳ 连接中...' :
-                 health ? '✅ 连接正常' :
-                 '❌ 连接失败'}
-              </span>
-            </div>
-            {health && (
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-muted-foreground">运行时间</span>
-                <span className="font-medium">{Math.floor(health.uptime)}s</span>
-              </div>
-            )}
-            {error && (
-              <p className="text-red-500 text-xs py-1">{error}</p>
-            )}
+    <div className="min-h-screen bg-slate-50">
+      {/* Top navigation bar */}
+      <nav className="sticky top-0 z-50 bg-white border-b border-slate-200">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="flex items-center h-14 gap-1">
+            {/* App title */}
+            <span className="text-lg font-bold mr-6 text-slate-800">Allin</span>
+
+            {/* Nav links */}
+            <NavLink to="/" end className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                isActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              )
+            }>
+              <TrendingUp className="w-4 h-4" />
+              <span>推荐</span>
+            </NavLink>
+
+            <NavLink to="/portfolio" className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                isActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              )
+            }>
+              <Briefcase className="w-4 h-4" />
+              <span>持仓</span>
+            </NavLink>
           </div>
-          <Button onClick={checkHealth} variant="outline" className="w-full" disabled={loading}>
-            {loading ? '检测中...' : '重新检测'}
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </nav>
+
+      {/* Page content */}
+      <main>
+        <Routes>
+          <Route path="/" element={<RecommendPage />} />
+          <Route path="/portfolio" element={<PortfolioPage />} />
+        </Routes>
+      </main>
     </div>
   );
 }
