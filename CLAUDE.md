@@ -24,13 +24,18 @@ npm run dev          # 同时启动前后端
 - 完成技术选型与架构设计
 - **骨架搭建完成** — Monorepo + 前后端通信链路 + shadcn/ui 集成
 - 端到端验证通过（健康检查 API + UI）
+- **Task 1: 天天基金 API 适配器** — 基金数据抓取、解析、缓存
+- **Task 2: 六维评分引擎** — 收益动量、风险控制、风险调整、经理能力、规模流动、景气匹配
+- **Task 3: 推荐管道 + API 路由** — /api/funds/recommend 端点，每日推荐管道
+- **Task 4: 前端推荐页面** — 推荐页面（雷达图 + Top 5 基金卡片），路由切换
+- **Task 5: 定时刷新** — node-cron 每个交易日 15:30 + 启动时首次运行
+- **模块一全部完成** — 端到端验证通过，API 返回 Top 5，前端展示完整
 
 ## 接下来要做什么
-1. **模块一** — 每日基金智能推荐（Top 5），六维评分筛选
-2. **模块二** — 持仓管理，交易信号 + 定投策略 + 止盈规则
-3. **模块三** — 基金查询与评分报告
-4. **模块四** — 重仓股透视与风格识别
-5. **模块五** — 板块排行与市场要闻
+1. **模块二** — 持仓管理，交易信号 + 定投策略 + 止盈规则
+2. **模块三** — 基金查询与评分报告
+3. **模块四** — 重仓股透视与风格识别
+4. **模块五** — 板块排行与市场要闻
 
 ## 关键文件索引
 
@@ -49,7 +54,16 @@ npm run dev          # 同时启动前后端
 | `packages/server/src/index.ts` | Express 服务入口 (port 3001) |
 | `packages/server/src/db/index.ts` | SQLite 数据库初始化 (3 张表) |
 | `packages/server/src/routes/health.ts` | GET /api/health |
-| `packages/client/src/App.tsx` | React 前端入口 |
+| `packages/server/src/routes/funds.ts` | GET /api/funds/recommend |
+| `packages/server/src/services/scoring.ts` | 六维评分引擎 |
+| `packages/server/src/services/recommend.ts` | 推荐管道（5步） |
+| `packages/server/src/adapters/eastmoney.ts` | 天天基金 API 适配器 |
+| `packages/server/src/scheduler/daily.ts` | 每日定时刷新（15:30） |
+| `packages/client/src/App.tsx` | React 前端入口（路由） |
+| `packages/client/src/pages/RecommendPage.tsx` | 每日推荐 Top 5 页面 |
+| `packages/client/src/components/fund/FundCard.tsx` | 基金评分卡片组件 |
+| `packages/client/src/components/fund/ScoreRadar.tsx` | 六维雷达图组件 |
+| `packages/client/src/hooks/useRecommendations.ts` | 推荐数据获取 hook |
 | `packages/client/src/components/ui/` | shadcn/ui 组件 (Button, Card) |
 
 ## 常见命令
