@@ -159,7 +159,7 @@ export default function HoldingsPanel({ code, fundName }: HoldingsPanelProps) {
         )}
 
         {/* Weighted change */}
-        {holdings.weightedChange !== undefined && holdings.weightedChange !== null && (
+        {holdings.weightedChange !== undefined && holdings.weightedChange !== null && holdings.weightedChange !== 0 && (
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-slate-400 shrink-0">加权涨跌:</span>
             <span
@@ -202,10 +202,10 @@ export default function HoldingsPanel({ code, fundName }: HoldingsPanelProps) {
                   <td className="px-3 py-2 font-mono text-xs text-slate-600">{h.stockCode}</td>
                   <td className="px-3 py-2 text-slate-800">{h.stockName}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs text-slate-700">
-                    {h.weight.toFixed(2)}%
+                    {h.weight > 0 ? `${h.weight.toFixed(2)}%` : '—'}
                   </td>
                   <td className={cn('px-3 py-2 text-right font-mono text-xs', changeColor)}>
-                    {h.changeToday >= 0 ? '+' : ''}{h.changeToday.toFixed(2)}%
+                    {h.changeToday !== 0 ? `${h.changeToday >= 0 ? '+' : ''}${h.changeToday.toFixed(2)}%` : '—'}
                   </td>
                 </tr>
               );

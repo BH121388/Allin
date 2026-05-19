@@ -55,15 +55,19 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
 
     if (detail && detail.stockCodes.length > 0) {
       // 使用真实持仓代码 + 股票名称映射
-      const realHoldings = detail.stockCodes.slice(0, 10).map((sc, i) => {
+      // 代码已由 fetchFundDetail 清洗，直接使用
+      const rawHoldings = detail.stockCodes.slice(0, 10).map((sc) => {
         const name = lookupStockName(sc);
-        return {
-          stockCode: sc,
-          stockName: name || (`持仓${i + 1}`),
-          weight: 0,
-          changeToday: 0,
-        };
+        return { stockCode: sc, stockName: name };
       }).filter(h => h.stockName);
+
+      // 等权分配（真实权重需从季报API获取）
+      const perWeight = rawHoldings.length > 0 ? Math.round((100 / rawHoldings.length) * 100) / 100 : 0;
+      const realHoldings = rawHoldings.map(h => ({
+        ...h,
+        weight: perWeight,
+        changeToday: 0, // 实时行情需额外API
+      }));
 
       data = {
         fundCode: code,
