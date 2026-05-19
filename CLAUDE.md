@@ -39,9 +39,10 @@ npm run dev          # 同时启动前后端
 - **模块三 Task 1: 基金查询 API** — GET /api/funds/search?code=XXXXXX，返回完整 FundAnalysis
 - **模块三 Task 2: 前端搜索页面** — SearchPage 搜索框 + 分析报告（评分/风险/持仓/同类比较），导航栏新增"查询"
 - **模块三全部完成** — 搜索 API 返回完整分析（354字分析+8项风险指标+5只重仓），前端搜索页+报告展示，端到端验证通过
+- **模块四 Task 1: 重仓股详情 API + 板块识别** — holdings.ts 服务（6大类×10只股票模板 / 风格匹配 / 加权涨跌幅 / 板块自动识别 / 风格判定），GET /api/funds/:code/holdings 端点
 
 ## 接下来要做什么
-1. **模块四** — 重仓股透视与风格识别
+1. **模块四 Task 2** — 前端 HoldingsPanel + 集成
 2. **模块五** — 板块排行与市场要闻
 
 ## 关键文件索引
@@ -64,7 +65,9 @@ npm run dev          # 同时启动前后端
 | `packages/server/src/routes/funds.ts` | GET /api/funds/recommend |
 | `packages/server/src/routes/portfolio.ts` | POST/GET/DELETE /api/portfolio |
 | `packages/server/src/routes/search.ts` | GET /api/funds/search?code=X |
+| `packages/server/src/routes/holdings.ts` | GET /api/funds/:code/holdings |
 | `packages/server/src/services/scoring.ts` | 六维评分引擎 |
+| `packages/server/src/services/holdings.ts` | 重仓股详情服务（6类模板/板块识别/风格判定） |
 | `packages/server/src/services/recommend.ts` | 推荐管道（5步） |
 | `packages/server/src/services/signals.ts` | 交易信号生成器 |
 | `packages/server/src/services/technical.ts` | 技术指标计算 (MA/RSI/MACD) |
