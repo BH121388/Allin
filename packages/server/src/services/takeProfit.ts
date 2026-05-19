@@ -137,6 +137,49 @@ const RULES: TakeProfitRule[] = [
       '第3阶梯：收益率达30%时清仓',
     ],
   },
+  {
+    fundType: 'QDII',
+    targetReturn: { min: 8, max: 15 },
+    method: 'batch',
+    description: 'QDII基金：参照偏股型，分3批止盈，每上涨5%触发一批',
+    steps: [
+      '第1批：收益率达8%时卖出1/3',
+      '第2批：收益率达13%时卖出1/3',
+      '第3批：收益率达15%时清仓',
+    ],
+  },
+  {
+    fundType: '灵活配置',
+    targetReturn: { min: 4, max: 6 },
+    method: 'half_then_trail',
+    description: '灵活配置型：参照混合型，到达目标后卖50%，剩余随涨随卖',
+    steps: [
+      '第1步：收益率达4%时卖出50%',
+      '第2步：剩余仓位随涨随卖，跌破MA10全部卖出',
+    ],
+  },
+  {
+    fundType: '联接',
+    targetReturn: { min: 10, max: 20 },
+    method: 'ladder',
+    description: 'ETF联接基金：参照ETF，阶梯止盈，每涨10%卖1/3',
+    steps: [
+      '第1阶梯：收益率达10%时卖出1/3',
+      '第2阶梯：收益率达20%时再卖1/3',
+      '第3阶梯：收益率达30%时清仓',
+    ],
+  },
+  {
+    fundType: 'LOF',
+    targetReturn: { min: 10, max: 20 },
+    method: 'ladder',
+    description: 'LOF基金：阶梯止盈，每涨10%卖1/3',
+    steps: [
+      '第1阶梯：收益率达10%时卖出1/3',
+      '第2阶梯：收益率达20%时再卖1/3',
+      '第3阶梯：收益率达30%时清仓',
+    ],
+  },
 ];
 
 // ============================================================
