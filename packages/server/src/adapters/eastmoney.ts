@@ -72,7 +72,7 @@ function parseFundListJS(text: string): string[][] | null {
     const parsed = JSON.parse(jsonStr) as unknown;
     if (!Array.isArray(parsed)) return null;
 
-    // 验证每个元素都是长度为 4 的数组
+    // 验证每个元素都是长度 >= 4 的数组（实际 5 列：code,pinyin_abbr,name,type,pinyin_full）
     for (const item of parsed) {
       if (!Array.isArray(item) || item.length < 4) return null;
     }
@@ -110,11 +110,12 @@ export async function fetchAllFunds(): Promise<FundInfo[]> {
       return getMockFunds();
     }
 
+    // API 返回格式: [code, pinyin_abbr, name, type, pinyin_full]
     const funds: FundInfo[] = rows.map((row) => ({
       code: row[0],
-      name: row[1],
-      company: row[2],
-      type: row[3],
+      name: row[2] || row[1],    // row[2] = 中文名称, 降级用 row[1]
+      type: row[3] || '',
+      company: '',
       manager: '',
       tenure: '',
       managerReturn: '',

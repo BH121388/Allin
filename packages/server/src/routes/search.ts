@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
-import { getMockFunds, getMockNAV, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, getMockNAV, type NAVEntry } from '../adapters/eastmoney.js';
 import { scoreFund, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
@@ -20,7 +20,7 @@ const router = Router();
 // 路由
 // ============================================================
 
-router.get('/funds/search', (_req: Request, res: Response) => {
+router.get('/funds/search', async (_req: Request, res: Response) => {
   try {
     const code = (_req.query.code as string || '').trim();
 
@@ -34,9 +34,22 @@ router.get('/funds/search', (_req: Request, res: Response) => {
       return;
     }
 
-    // 1. 查找基金
-    const funds = getMockFunds();
-    const fund = funds.find((f) => f.code === code);
+    // 1. 查找基金：优先从真实 API 搜索，降级到 mock
+    const allFunds = await fetchAllFunds();
+    let fund = allFunds.find((f) => f.code === code);
+
+    // 真实数据中的 FundInfo 缺少部分字段，用 mock 数据补全
+    if (fund) {
+      const mockFunds = getMockFunds();
+      const mockMatch = mockFunds.find((f) => f.code === code);
+      if (mockMatch) {
+        fund = { ...fund, ...mockMatch }; // mock 数据覆盖缺失字段
+      }
+    } else {
+      // 真实 API 中没找到，尝试 mock（兼容之前的行为）
+      const mockFunds = getMockFunds();
+      fund = mockFunds.find((f) => f.code === code);
+    }
 
     if (!fund) {
       const body: ApiResponse<never> = {
