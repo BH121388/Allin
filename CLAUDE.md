@@ -40,10 +40,11 @@ npm run dev          # 同时启动前后端
 - **模块三 Task 2: 前端搜索页面** — SearchPage 搜索框 + 分析报告（评分/风险/持仓/同类比较），导航栏新增"查询"
 - **模块三全部完成** — 搜索 API 返回完整分析（354字分析+8项风险指标+5只重仓），前端搜索页+报告展示，端到端验证通过
 - **模块四 Task 1: 重仓股详情 API + 板块识别** — holdings.ts 服务（6大类×10只股票模板 / 风格匹配 / 加权涨跌幅 / 板块自动识别 / 风格判定），GET /api/funds/:code/holdings 端点
+- **模块四 Task 2: 前端 HoldingsPanel + 集成** — HoldingsPanel 十大重仓表格+板块标签+加权涨跌，集成到 SearchPage 和 PortfolioPage
+- **模块四全部完成** — 重仓股透视 API（6风格/10只/加权涨跌/板块识别），前端面板+集成，端到端验证通过
 
 ## 接下来要做什么
-1. **模块四 Task 2** — 前端 HoldingsPanel + 集成
-2. **模块五** — 板块排行与市场要闻
+1. **模块五** — 板块排行与市场要闻（最后模块）
 
 ## 关键文件索引
 
@@ -80,9 +81,11 @@ npm run dev          # 同时启动前后端
 | `packages/client/src/pages/SearchPage.tsx` | 基金查询与完整分析报告页面 |
 | `packages/client/src/components/fund/FundCard.tsx` | 基金评分卡片组件 |
 | `packages/client/src/components/fund/ScoreRadar.tsx` | 六维雷达图组件 |
+| `packages/client/src/components/fund/HoldingsPanel.tsx` | 十大重仓股面板（表格+板块+风格） |
 | `packages/client/src/hooks/useRecommendations.ts` | 推荐数据获取 hook |
 | `packages/client/src/hooks/useFundSearch.ts` | 基金查询 hook |
 | `packages/client/src/hooks/usePortfolio.ts` | 持仓数据 CRUD hook |
+| `packages/client/src/hooks/useHoldings.ts` | 重仓股数据获取 hook |
 | `packages/client/src/pages/PortfolioPage.tsx` | 持仓管理页面 |
 | `packages/client/src/components/portfolio/SignalBadge.tsx` | 交易信号标签组件 |
 | `packages/client/src/components/portfolio/HoldingCard.tsx` | 持仓卡片（含止盈评估） |
