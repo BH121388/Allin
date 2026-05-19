@@ -3,6 +3,9 @@ import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shar
 import { getDb } from '../db/index.js';
 import { getMockNAV, getMockFunds } from '../adapters/eastmoney.js';
 import { scoreFund } from '../services/scoring.js';
+import { calculateInvestAmount } from '../services/invest.js';
+import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
+import type { TakeProfitRule, TakeProfitAction } from '../services/takeProfit.js';
 
 // ============================================================
 // 持仓数据类型
@@ -32,6 +35,28 @@ interface PortfolioHolding {
   score: FundScore;
   signal: SignalResult;
   addedAt: string;
+}
+
+// ============================================================
+// 定投计算 & 止盈评估 响应类型
+// ============================================================
+
+interface InvestCalcResult {
+  code: string;
+  pePercentile: number;
+  baseAmount: number;
+  multiplier: number;
+  actualAmount: number;
+  strategy: string;
+}
+
+interface TakeProfitEval {
+  code: string;
+  fundType: string;
+  currentReturn: number;
+  holdingDays: number;
+  rule: TakeProfitRule;
+  evaluation: TakeProfitAction;
 }
 
 // ============================================================
@@ -142,6 +167,141 @@ router.post('/portfolio/add', (req: Request, res: Response) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('[portfolio] add error:', message);
+    const body: ApiResponse<never> = {
+      success: false,
+      error: message,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(500).json(body);
+  }
+});
+
+// ============================================================
+// GET /api/portfolio/:code/invest — 定投计算
+// ============================================================
+
+router.get('/portfolio/:code/invest', (req: Request, res: Response) => {
+  try {
+    const code = req.params.code as string;
+    const pePercentile = parseFloat(req.query.pePercentile as string);
+    const monthlyBudget = parseFloat(req.query.monthlyBudget as string);
+
+    if (Number.isNaN(pePercentile) || pePercentile < 0 || pePercentile > 100) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: '缺少有效参数: pePercentile (0-100)',
+        timestamp: new Date().toISOString(),
+      };
+      res.status(400).json(body);
+      return;
+    }
+
+    if (Number.isNaN(monthlyBudget) || monthlyBudget <= 0) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: '缺少有效参数: monthlyBudget (> 0)',
+        timestamp: new Date().toISOString(),
+      };
+      res.status(400).json(body);
+      return;
+    }
+
+    // 查一下数据库确认该基金在持仓中
+    const db = getDb();
+    const holding = db.prepare('SELECT code FROM portfolio WHERE code = ?').get(code);
+    if (!holding) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: `基金 ${code} 不在持仓列表中`,
+        timestamp: new Date().toISOString(),
+      };
+      res.status(404).json(body);
+      return;
+    }
+
+    const result = calculateInvestAmount(monthlyBudget, pePercentile);
+
+    const body: ApiResponse<InvestCalcResult> = {
+      success: true,
+      data: {
+        code,
+        pePercentile,
+        baseAmount: result.baseAmount,
+        multiplier: result.multiplier,
+        actualAmount: result.actualAmount,
+        strategy: result.strategy,
+      },
+      timestamp: new Date().toISOString(),
+    };
+    res.json(body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[portfolio] invest error:', message);
+    const body: ApiResponse<never> = {
+      success: false,
+      error: message,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(500).json(body);
+  }
+});
+
+// ============================================================
+// GET /api/portfolio/:code/takeProfit — 止盈评估
+// ============================================================
+
+router.get('/portfolio/:code/takeProfit', (req: Request, res: Response) => {
+  try {
+    const code = req.params.code as string;
+
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM portfolio WHERE code = ?').get(code) as PortfolioRow | undefined;
+    if (!row) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: `基金 ${code} 不在持仓列表中`,
+        timestamp: new Date().toISOString(),
+      };
+      res.status(404).json(body);
+      return;
+    }
+
+    // 计算当前收益
+    const navData = getMockNAV(code);
+    const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+    const currentValue = row.shares * currentNav;
+    const pnl = currentValue - row.amount;
+    const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
+
+    // 持有天数
+    const addedDate = new Date(row.added_at);
+    const now = new Date();
+    const holdingDays = Math.floor((now.getTime() - addedDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    // 查找基金类型
+    const mockFunds = getMockFunds();
+    const fundInfo = mockFunds.find((f) => f.code === code);
+    const fundType = fundInfo?.type ?? '';
+
+    const rule = getTakeProfitRule(fundType);
+    const evaluation = evaluateTakeProfit(fundType, pnlPercent, holdingDays);
+
+    const body: ApiResponse<TakeProfitEval> = {
+      success: true,
+      data: {
+        code,
+        fundType,
+        currentReturn: Math.round(pnlPercent * 100) / 100,
+        holdingDays,
+        rule,
+        evaluation,
+      },
+      timestamp: new Date().toISOString(),
+    };
+    res.json(body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[portfolio] takeProfit error:', message);
     const body: ApiResponse<never> = {
       success: false,
       error: message,
