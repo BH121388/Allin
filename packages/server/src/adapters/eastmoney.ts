@@ -190,6 +190,111 @@ export async function fetchFundNAV(code: string, days = 90): Promise<NAVEntry[]>
 }
 
 // ============================================================
+// 基金详情 — 从 pingzhongdata API 获取真实净值/收益/持仓
+// ============================================================
+
+export interface FundDetail {
+  code: string;
+  name: string;
+  returns: { ret1m: number; ret3m: number; ret6m: number; ret1y: number };
+  stockCodes: string[]; // 真实持仓代码（需清洗）
+  navHistory: NAVEntry[];
+  dataDate: string; // 数据日期
+}
+
+const FUND_DETAIL_URL = 'http://fund.eastmoney.com/pingzhongdata/';
+
+export async function fetchFundDetail(code: string): Promise<FundDetail | null> {
+  try {
+    const url = `${FUND_DETAIL_URL}${code}.js`;
+    const resp = await fetchWithTimeout(url);
+    if (!resp || !resp.ok) return null;
+    const text = await resp.text();
+
+    // 解析基金名称
+    const name = (text.match(/fS_name\s*=\s*"([^"]+)"/) || [])[1] || '';
+
+    // 解析收益率
+    const ret1m = parseFloat((text.match(/syl_1y\s*=\s*"([^"]+)"/) || [])[1] || '0');
+    const ret3m = parseFloat((text.match(/syl_3y\s*=\s*"([^"]+)"/) || [])[1] || '0');
+    const ret6m = parseFloat((text.match(/syl_6y\s*=\s*"([^"]+)"/) || [])[1] || '0');
+    const ret1y = parseFloat((text.match(/syl_1n\s*=\s*"([^"]+)"/) || [])[1] || '0');
+
+    // 解析持仓代码并清洗
+    const stockCodes: string[] = [];
+    const codesMatch = text.match(/stockCodes\s*=\s*(\[[^\]]*\])/);
+    if (codesMatch) {
+      const raw = JSON.parse(codesMatch[1]) as string[];
+      stockCodes.push(...raw.map(c => cleanStockCode(c)).filter(Boolean));
+    }
+
+    // 解析净值历史
+    const navHistory: NAVEntry[] = [];
+    const navMatch = text.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+    if (navMatch) {
+      const rawNavs = JSON.parse(navMatch[1]) as Array<{ x: number; y: number; equityReturn: number }>;
+      // 取最近 90 条
+      for (const item of rawNavs.slice(-90)) {
+        navHistory.push({
+          date: new Date(item.x).toISOString().slice(0, 10),
+          nav: Math.round(item.y * 10000) / 10000,
+          accNav: Math.round(item.y * 10000) / 10000,
+          dailyReturn: item.equityReturn || 0,
+        });
+      }
+    }
+
+    return { code, name, returns: { ret1m, ret3m, ret6m, ret1y }, stockCodes, navHistory, dataDate: new Date().toISOString().slice(0, 10) };
+  } catch (err) {
+    console.warn(`[eastmoney] 获取基金 ${code} 详情失败:`, (err as Error).message);
+    return null;
+  }
+}
+
+// ============================================================
+// 真实持仓代码 → 股票名称映射
+// ============================================================
+
+// A股常见股票代码→名称映射（基于真实数据，持续补充）
+const STOCK_NAME_MAP: Record<string, string> = {
+  '600519': '贵州茅台', '000858': '五粮液', '000568': '泸州老窖',
+  '600887': '伊利股份', '002415': '海康威视', '601318': '中国平安',
+  '600036': '招商银行', '601166': '兴业银行', '600030': '中信证券',
+  '601398': '工商银行', '601288': '农业银行', '601328': '交通银行',
+  '600276': '恒瑞医药', '300760': '迈瑞医疗', '300015': '爱尔眼科',
+  '300750': '宁德时代', '002594': '比亚迪', '601012': '隆基绿能',
+  '300274': '阳光电源', '600438': '通威股份', '002371': '北方华创',
+  '002230': '科大讯飞', '002475': '立讯精密', '000725': '京东方A',
+  '600809': '山西汾酒', '002304': '洋河股份', '000333': '美的集团',
+  '000651': '格力电器', '002027': '分众传媒', '600900': '长江电力',
+  '601899': '紫金矿业', '600048': '保利发展', '001979': '招商蛇口',
+  '300124': '汇川技术', '002049': '紫光国微', '603259': '药明康德',
+  '300122': '智飞生物', '688981': '中芯国际', '002714': '牧原股份',
+  '300498': '温氏股份', '002352': '顺丰控股', '601088': '中国神华',
+  '600028': '中国石化', '601857': '中国石油', '000002': '万科A',
+  '600031': '三一重工', '000338': '潍柴动力', '002142': '宁波银行',
+  '600585': '海螺水泥', '000063': '中兴通讯', '002241': '歌尔股份',
+  '688111': '金山办公', '300661': '圣邦股份', '000596': '古井贡酒',
+  '00700': '腾讯控股', '03690': '美团-W', '09988': '阿里巴巴-SW',
+  '09987': '百胜中国', '00883': '中国海洋石油', '06618': '京东健康',
+  '09618': '京东集团-SW', '09888': '百度集团-SW', '09999': '网易-S',
+  '01024': '快手-W', '01810': '小米集团-W', '01211': '比亚迪股份',
+};
+
+function cleanStockCode(raw: string): string {
+  // A股: 6位数字 + 1位市场标识 → 取前6位 (如 6005191→600519, 0008580→000858)
+  // 港股: 5位数字 + 后缀 → 取前5位 (如 00700116→00700, 09987116→09987)
+  if (/^\d{7}$/.test(raw)) return raw.slice(0, 6);
+  if (/^\d{5}\d{2,}$/.test(raw)) return raw.slice(0, 5);
+  return raw;
+}
+
+export function lookupStockName(code: string): string {
+  const clean = cleanStockCode(code);
+  return STOCK_NAME_MAP[clean] || STOCK_NAME_MAP[code] || '';
+}
+
+// ============================================================
 // 天天基金 API 响应类型
 // ============================================================
 

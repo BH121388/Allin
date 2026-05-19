@@ -21,6 +21,7 @@ export interface HoldingsDetail {
   sectorBreakdown: SectorWeight[]; // 行业占比明细
   style: string;                 // "大盘价值" / "大盘成长" / "均衡配置"
   dataDate: string;              // "2026-03-31"
+  source?: string;               // 数据来源: "天天基金" | "模拟数据"
 }
 
 export interface SectorWeight {
@@ -315,6 +316,7 @@ export function generateHoldings(fund: FundInfo): HoldingsDetail {
     sectorBreakdown,
     style: fundStyle,
     dataDate: '2026-03-31',
+    source: '模拟数据',
   };
 }
 

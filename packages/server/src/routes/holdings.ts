@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import type { ApiResponse } from '@allin/shared';
 import type { HoldingsDetail } from '../services/holdings.js';
 import { generateHoldings } from '../services/holdings.js';
-import { fetchAllFunds, getMockFunds } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, fetchFundDetail, lookupStockName } from '../adapters/eastmoney.js';
 
 const router = Router();
 
@@ -49,8 +49,37 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
       return;
     }
 
-    // 生成持仓详情
-    const data: HoldingsDetail = generateHoldings(fund);
+    // 尝试获取真实持仓数据
+    const detail = await fetchFundDetail(code);
+    let data: HoldingsDetail;
+
+    if (detail && detail.stockCodes.length > 0) {
+      // 使用真实持仓代码 + 股票名称映射
+      const realHoldings = detail.stockCodes.slice(0, 10).map((sc, i) => {
+        const name = lookupStockName(sc);
+        return {
+          stockCode: sc,
+          stockName: name || (`持仓${i + 1}`),
+          weight: 0,
+          changeToday: 0,
+        };
+      }).filter(h => h.stockName);
+
+      data = {
+        fundCode: code,
+        fundName: fund.name || detail.name,
+        holdings: realHoldings.length > 0 ? realHoldings : generateHoldings(fund).holdings,
+        weightedChange: 0,
+        sectorTags: realHoldings.length > 0 ? deriveSectorTagsSimple(realHoldings.map(h => h.stockName)) : [],
+        sectorBreakdown: [],
+        style: '',
+        dataDate: detail.dataDate,
+        source: '天天基金',
+      };
+    } else {
+      data = generateHoldings(fund);
+      data.source = '模拟数据';
+    }
 
     const body: ApiResponse<HoldingsDetail> = {
       success: true,
@@ -71,5 +100,29 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
     res.status(500).json(body);
   }
 });
+
+// 简单的股票名→板块标签推导（基于关键词）
+function deriveSectorTagsSimple(stockNames: string[]): string[] {
+  const tags = new Set<string>();
+  const mapping: Record<string, string[]> = {
+    '茅台': ['消费'], '五粮液': ['消费'], '泸州': ['消费'], '伊利': ['消费'],
+    '宁德': ['新能源'], '比亚迪': ['新能源', '制造'], '隆基': ['新能源'],
+    '迈瑞': ['医药'], '恒瑞': ['医药'], '爱尔': ['医药'], '药明': ['医药'],
+    '招商银行': ['金融'], '平安': ['金融'], '兴业': ['金融'],
+    '海康': ['科技-TMT'], '科大': ['科技-TMT'], '立讯': ['科技-TMT'],
+    '腾讯': ['科技-TMT'], '阿里': ['科技-TMT'], '美团': ['科技-TMT'],
+    '金山': ['科技-TMT'], '中芯': ['科技-TMT'],
+    '长江电力': ['公用事业'], '紫金': ['能源材料'],
+    '美的': ['消费'], '格力': ['消费'], '洋河': ['消费'],
+    '三一': ['制造'], '潍柴': ['制造'],
+    '万科': ['金融地产'], '保利': ['金融地产'],
+  };
+  for (const [keyword, ts] of Object.entries(mapping)) {
+    if (stockNames.some(n => n.includes(keyword))) {
+      ts.forEach(t => tags.add(t));
+    }
+  }
+  return Array.from(tags).slice(0, 5);
+}
 
 export default router;
