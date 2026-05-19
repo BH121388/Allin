@@ -11,6 +11,14 @@ app.use(express.json());
 // Routes
 app.use('/api', healthRouter);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[server] running at http://localhost:${PORT}`);
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[server] port ${PORT} is already in use`);
+    process.exit(1);
+  }
+  throw err;
 });
