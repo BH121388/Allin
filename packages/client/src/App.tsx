@@ -7,6 +7,7 @@ function App() {
 
   const checkHealth = () => {
     setLoading(true);
+    setHealth(null);
     setError(null);
     fetch('/api/health')
       .then(res => res.json())
