@@ -3,6 +3,7 @@ import cors from 'cors';
 import healthRouter from './routes/health.js';
 import fundsRouter from './routes/funds.js';
 import portfolioRouter from './routes/portfolio.js';
+import searchRouter from './routes/search.js';
 import { startScheduler } from './scheduler/daily.js';
 
 const app = express();
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use('/api', healthRouter);
 app.use('/api', fundsRouter);
 app.use('/api', portfolioRouter);
+app.use('/api', searchRouter);
 
 // Start daily recommendation scheduler
 startScheduler();

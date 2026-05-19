@@ -149,7 +149,7 @@ function calcYtdReturn(navData: NAVEntry[]): number {
 /**
  * 计算历史最大回撤（%）。
  */
-function calcMaxDrawdown(navData: NAVEntry[]): number {
+export function calcMaxDrawdown(navData: NAVEntry[]): number {
   if (navData.length < 2) return 0;
 
   let peak = navData[0].nav;
@@ -169,7 +169,7 @@ function calcMaxDrawdown(navData: NAVEntry[]): number {
 /**
  * 计算年化波动率（%）。
  */
-function calcAnnualVolatility(navData: NAVEntry[]): number {
+export function calcAnnualVolatility(navData: NAVEntry[]): number {
   const returns = navData.slice(1).map((e) => e.dailyReturn);
   if (returns.length < 2) return 0;
 
@@ -183,7 +183,7 @@ function calcAnnualVolatility(navData: NAVEntry[]): number {
 /**
  * 计算夏普比率。
  */
-function calcSharpe(navData: NAVEntry[]): number {
+export function calcSharpe(navData: NAVEntry[]): number {
   const returns = navData.slice(1).map((e) => e.dailyReturn);
   if (returns.length < 2) return 0;
 
