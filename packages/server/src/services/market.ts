@@ -184,6 +184,7 @@ export function generateMarketOverview(): MarketOverview {
     topGainers,
     topLosers,
     hotSectors,
+    allSectors,
     events,
     opportunities,
     risks,

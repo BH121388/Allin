@@ -42,9 +42,12 @@ npm run dev          # 同时启动前后端
 - **模块四 Task 1: 重仓股详情 API + 板块识别** — holdings.ts 服务（6大类×10只股票模板 / 风格匹配 / 加权涨跌幅 / 板块自动识别 / 风格判定），GET /api/funds/:code/holdings 端点
 - **模块四 Task 2: 前端 HoldingsPanel + 集成** — HoldingsPanel 十大重仓表格+板块标签+加权涨跌，集成到 SearchPage 和 PortfolioPage
 - **模块四全部完成** — 重仓股透视 API（6风格/10只/加权涨跌/板块识别），前端面板+集成，端到端验证通过
+- **模块五 Task 1: 市场数据服务 + API** — market.ts 服务（30个板块/涨跌生成/热度标记/新闻事件/机会风险），GET /api/market/overview 端点
+- **模块五 Task 2: 前端市场页面** — MarketPage（板块排行30行表格+前5绿底后5红底/今日要闻/市场影响总结/红利机会/风险提示），useMarket hook，导航栏新增"市场"tab
+- **模块五全部完成** — 市场概览 API + 前端市场页面，端到端TypeScript编译通过
 
 ## 接下来要做什么
-1. **模块五** — 板块排行与市场要闻（最后模块）
+- 全部五大模块已完成，可进行端到端验证和最终测试
 
 ## 关键文件索引
 
@@ -76,6 +79,8 @@ npm run dev          # 同时启动前后端
 | `packages/server/src/services/takeProfit.ts` | 止盈规则引擎（5种策略） |
 | `packages/server/src/adapters/eastmoney.ts` | 天天基金 API 适配器 |
 | `packages/server/src/scheduler/daily.ts` | 每日定时刷新（15:30） |
+| `packages/server/src/services/market.ts` | 市场数据生成器（板块/新闻/机会/风险） |
+| `packages/server/src/routes/market.ts` | GET /api/market/overview |
 | `packages/client/src/App.tsx` | React 前端入口（路由） |
 | `packages/client/src/pages/RecommendPage.tsx` | 每日推荐 Top 5 页面 |
 | `packages/client/src/pages/SearchPage.tsx` | 基金查询与完整分析报告页面 |
@@ -86,7 +91,9 @@ npm run dev          # 同时启动前后端
 | `packages/client/src/hooks/useFundSearch.ts` | 基金查询 hook |
 | `packages/client/src/hooks/usePortfolio.ts` | 持仓数据 CRUD hook |
 | `packages/client/src/hooks/useHoldings.ts` | 重仓股数据获取 hook |
+| `packages/client/src/hooks/useMarket.ts` | 市场数据获取 hook |
 | `packages/client/src/pages/PortfolioPage.tsx` | 持仓管理页面 |
+| `packages/client/src/pages/MarketPage.tsx` | 市场概览页面（板块排行+要闻+机会） |
 | `packages/client/src/components/portfolio/SignalBadge.tsx` | 交易信号标签组件 |
 | `packages/client/src/components/portfolio/HoldingCard.tsx` | 持仓卡片（含止盈评估） |
 | `packages/client/src/components/portfolio/InvestModal.tsx` | 定投计算弹窗 |

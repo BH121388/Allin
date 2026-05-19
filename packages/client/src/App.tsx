@@ -1,7 +1,9 @@
 import { Routes, Route, NavLink } from 'react-router-dom';
 import RecommendPage from '@/pages/RecommendPage';
+import SearchPage from '@/pages/SearchPage';
 import PortfolioPage from '@/pages/PortfolioPage';
-import { TrendingUp, Briefcase } from 'lucide-react';
+import MarketPage from '@/pages/MarketPage';
+import { TrendingUp, Search, Briefcase, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function App() {
@@ -25,6 +27,16 @@ function App() {
               <span>推荐</span>
             </NavLink>
 
+            <NavLink to="/search" className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                isActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              )
+            }>
+              <Search className="w-4 h-4" />
+              <span>查询</span>
+            </NavLink>
+
             <NavLink to="/portfolio" className={({ isActive }) =>
               cn(
                 "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
@@ -34,6 +46,16 @@ function App() {
               <Briefcase className="w-4 h-4" />
               <span>持仓</span>
             </NavLink>
+
+            <NavLink to="/market" className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                isActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              )
+            }>
+              <BarChart3 className="w-4 h-4" />
+              <span>市场</span>
+            </NavLink>
           </div>
         </div>
       </nav>
@@ -42,7 +64,9 @@ function App() {
       <main>
         <Routes>
           <Route path="/" element={<RecommendPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/market" element={<MarketPage />} />
         </Routes>
       </main>
     </div>

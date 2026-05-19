@@ -129,6 +129,7 @@ export interface MarketOverview {
   topGainers: SectorInfo[];
   topLosers: SectorInfo[];
   hotSectors: SectorInfo[];
+  allSectors: SectorInfo[];
   events: MarketEvent[];
   opportunities: string[];
   risks: string[];
