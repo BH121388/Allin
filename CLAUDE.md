@@ -36,11 +36,13 @@ npm run dev          # 同时启动前后端
 - **Task 4: 前端持仓页面** — PortfolioPage + HoldingCard + SignalBadge + InvestModal + AddFundForm + usePortfolio hook
 - **Task 5: 导航 + 路由整合** — App.tsx 添加顶部导航栏（推荐/持仓），路由切换
 - **模块二全部完成** — 持仓 CRUD、交易信号、定投计算、止盈评估、前端页面，端到端验证通过
+- **模块三 Task 1: 基金查询 API** — GET /api/funds/search?code=XXXXXX，返回完整 FundAnalysis
+- **模块三 Task 2: 前端搜索页面** — SearchPage 搜索框 + 分析报告（评分/风险/持仓/同类比较），导航栏新增"查询"
+- **模块三全部完成** — 搜索 API 返回完整分析（354字分析+8项风险指标+5只重仓），前端搜索页+报告展示，端到端验证通过
 
 ## 接下来要做什么
-1. **模块三** — 基金查询与评分报告
-2. **模块四** — 重仓股透视与风格识别
-3. **模块五** — 板块排行与市场要闻
+1. **模块四** — 重仓股透视与风格识别
+2. **模块五** — 板块排行与市场要闻
 
 ## 关键文件索引
 
@@ -60,7 +62,8 @@ npm run dev          # 同时启动前后端
 | `packages/server/src/db/index.ts` | SQLite 数据库初始化 (3 张表) |
 | `packages/server/src/routes/health.ts` | GET /api/health |
 | `packages/server/src/routes/funds.ts` | GET /api/funds/recommend |
-| `packages/server/src/routes/portfolio.ts` | GET/DELETE /api/portfolio |
+| `packages/server/src/routes/portfolio.ts` | POST/GET/DELETE /api/portfolio |
+| `packages/server/src/routes/search.ts` | GET /api/funds/search?code=X |
 | `packages/server/src/services/scoring.ts` | 六维评分引擎 |
 | `packages/server/src/services/recommend.ts` | 推荐管道（5步） |
 | `packages/server/src/services/signals.ts` | 交易信号生成器 |
@@ -71,9 +74,11 @@ npm run dev          # 同时启动前后端
 | `packages/server/src/scheduler/daily.ts` | 每日定时刷新（15:30） |
 | `packages/client/src/App.tsx` | React 前端入口（路由） |
 | `packages/client/src/pages/RecommendPage.tsx` | 每日推荐 Top 5 页面 |
+| `packages/client/src/pages/SearchPage.tsx` | 基金查询与完整分析报告页面 |
 | `packages/client/src/components/fund/FundCard.tsx` | 基金评分卡片组件 |
 | `packages/client/src/components/fund/ScoreRadar.tsx` | 六维雷达图组件 |
 | `packages/client/src/hooks/useRecommendations.ts` | 推荐数据获取 hook |
+| `packages/client/src/hooks/useFundSearch.ts` | 基金查询 hook |
 | `packages/client/src/hooks/usePortfolio.ts` | 持仓数据 CRUD hook |
 | `packages/client/src/pages/PortfolioPage.tsx` | 持仓管理页面 |
 | `packages/client/src/components/portfolio/SignalBadge.tsx` | 交易信号标签组件 |
