@@ -9,11 +9,11 @@ import { Router, Request, Response } from 'express';
 import type { ApiResponse } from '@allin/shared';
 import type { HoldingsDetail } from '../services/holdings.js';
 import { generateHoldings } from '../services/holdings.js';
-import { getMockFunds } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds } from '../adapters/eastmoney.js';
 
 const router = Router();
 
-router.get('/funds/:code/holdings', (req: Request, res: Response) => {
+router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
   try {
     const code = (req.params.code as string || '').trim();
 
@@ -27,9 +27,17 @@ router.get('/funds/:code/holdings', (req: Request, res: Response) => {
       return;
     }
 
-    // 查找基金
-    const funds = getMockFunds();
-    const fund = funds.find((f) => f.code === code);
+    // 优先从真实 API 搜索，降级到 mock
+    const allFunds = await fetchAllFunds();
+    let fund = allFunds.find((f) => f.code === code);
+    if (fund) {
+      const mockFunds = getMockFunds();
+      const mockMatch = mockFunds.find((f) => f.code === code);
+      if (mockMatch) fund = { ...fund, ...mockMatch };
+    } else {
+      const mockFunds = getMockFunds();
+      fund = mockFunds.find((f) => f.code === code);
+    }
 
     if (!fund) {
       const body: ApiResponse<never> = {

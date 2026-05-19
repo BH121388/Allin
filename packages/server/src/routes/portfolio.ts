@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
 import { getMockNAV, getMockFunds } from '../adapters/eastmoney.js';
-import { scoreFund } from '../services/scoring.js';
+import { scoreFund, scoreAllFunds } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
 import type { TakeProfitRule, TakeProfitAction } from '../services/takeProfit.js';
@@ -367,33 +367,39 @@ router.get('/portfolio', (_req: Request, res: Response) => {
     let totalValue = 0;
     let totalCost = 0;
 
+    // 收集所有持仓的 FundInfo 和 NAV，用于批量交叉归一化评分
+    const fundInfos: FundInfo[] = [];
+    const navMap = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
+    const navDataByCode = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
+
     for (const row of rows) {
       const navData = getMockNAV(row.code);
-      const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
-      const currentValue = row.shares * currentNav;
-      const pnl = currentValue - row.amount;
-      const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
-
-      // 从 mock 数据中查找基金信息用于评分，找不到则构造最小 FundInfo
+      navDataByCode.set(row.code, navData);
       let fundInfo: FundInfo;
       const existing = fundMap.get(row.code);
       if (existing) {
         fundInfo = existing;
       } else {
         fundInfo = {
-          code: row.code,
-          name: row.name,
-          type: '',
-          manager: '',
-          tenure: '',
-          managerReturn: '',
-          scale: 0,
-          inception: '',
-          company: '',
+          code: row.code, name: row.name, type: '', manager: '',
+          tenure: '', managerReturn: '', scale: 0, inception: '', company: '',
         };
       }
+      fundInfos.push(fundInfo);
+      navMap.set(row.code, navData);
+    }
 
-      const score = scoreFund(fundInfo, navData);
+    // 批量评分确保与推荐一致的交叉归一化
+    const scores = scoreAllFunds(fundInfos, navMap);
+
+    for (const row of rows) {
+      const navData = navDataByCode.get(row.code) || [];
+      const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+      const currentValue = row.shares * currentNav;
+      const pnl = currentValue - row.amount;
+      const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
+
+      const score = scores.get(row.code) || { momentum: 0, riskControl: 0, riskAdjusted: 0, manager: 0, scale: 0, sectorMatch: 0, total: 0 };
       const signal = getSignal(score.total);
 
       holdings.push({

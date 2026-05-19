@@ -8,7 +8,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
 import { fetchAllFunds, getMockFunds, getMockNAV, type NAVEntry } from '../adapters/eastmoney.js';
-import { scoreFund, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
+import { scoreFund, scoreAllFunds, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
 import { calculateInvestMultiplier } from '../services/invest.js';
@@ -64,8 +64,16 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
     // 2. 获取净值数据
     const navData = getMockNAV(code);
 
-    // 3. 六维评分
-    const score = scoreFund(fund, navData);
+    // 3. 六维评分 — 使用与推荐一致的批量交叉归一化
+    const mockFunds = getMockFunds();
+    const navMap = new Map<string, NAVEntry[]>();
+    navMap.set(code, navData);
+    // 补全 mock 基金池的净值数据用于归一化
+    for (const mf of mockFunds) {
+      if (mf.code !== code) navMap.set(mf.code, getMockNAV(mf.code));
+    }
+    const allScores = scoreAllFunds(mockFunds, navMap);
+    const score = allScores.get(code) || scoreFund(fund, navData);
 
     // 4. 交易信号
     const signal = generateSignal(fund, score, navData);
