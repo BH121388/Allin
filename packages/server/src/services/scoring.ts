@@ -67,15 +67,15 @@ const FIXED_REF = {
 // ============================================================
 
 const SECTOR_BASE: Record<string, number> = {
-  '股票型': 6,
-  '偏股混合型': 5,
-  '灵活配置型': 4,
-  '指数型': 6,
-  'QDII': 4,
-  '债券型': 3,
-  '货币型': 2,
-  '混合型': 5,
-  'ETF': 6,
+  '股票型': 7.5,
+  '偏股混合型': 6.5,
+  '灵活配置型': 5.5,
+  '指数型': 7.5,
+  'QDII': 5.5,
+  '债券型': 4.5,
+  '货币型': 3.5,
+  '混合型': 6.5,
+  'ETF': 7.5,
 };
 
 // ============================================================
@@ -489,28 +489,28 @@ function scoreManager(returnPct: number, years: number): number {
 // ============================================================
 
 function scoreScale(scale: number): number {
-  // 规模未知，给中等分（7.5 取整为 7，保守估计）
-  if (scale === 0) return 7;
+  // 规模未知，给保守分
+  if (scale === 0) return 6;
 
   if (scale < 5) {
     return Math.round((scale / 5) * 15);
   }
-  if (scale <= 50) {
+  if (scale <= 30) {
     return 15;
   }
-  // > 50 亿：分段线性衰减
-  // 50-100 亿: 15 → 12
-  // 100-200 亿: 12 → 7
-  // 200-500 亿: 7 → 2
-  // > 500 亿: 最低 1
-  if (scale <= 100) {
-    return Math.round(15 - ((scale - 50) / 50) * 3);
+  // > 30 亿：分段线性衰减（收紧边界，惩罚大基金）
+  // 30-80 亿: 15 → 12
+  // 80-150 亿: 12 → 7
+  // 150-300 亿: 7 → 2
+  // > 300 亿: 最低 1
+  if (scale <= 80) {
+    return Math.round(15 - ((scale - 30) / 50) * 3);
   }
-  if (scale <= 200) {
-    return Math.round(12 - ((scale - 100) / 100) * 5);
+  if (scale <= 150) {
+    return Math.round(12 - ((scale - 80) / 70) * 5);
   }
-  if (scale <= 500) {
-    return Math.round(7 - ((scale - 200) / 300) * 5);
+  if (scale <= 300) {
+    return Math.round(7 - ((scale - 150) / 150) * 5);
   }
   return 1;
 }

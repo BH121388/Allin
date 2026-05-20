@@ -42,101 +42,108 @@ interface StockTemplate {
 }
 
 /** 蓝筹/消费类 */
+/** 中小盘成长类（替代原蓝筹消费，排除茅台/五粮液/工行/万科等超大市值） */
 const BLUECHIP_STOCKS: StockTemplate[] = [
-  { code: '600519', name: '贵州茅台', baseWeight: 9.8, sector: '食品饮料' },
-  { code: '000858', name: '五粮液',   baseWeight: 8.2, sector: '食品饮料' },
-  { code: '600036', name: '招商银行', baseWeight: 7.0, sector: '银行' },
-  { code: '000333', name: '美的集团', baseWeight: 6.5, sector: '家电' },
-  { code: '601318', name: '中国平安', baseWeight: 6.0, sector: '非银行金融' },
-  { code: '600887', name: '伊利股份', baseWeight: 5.2, sector: '食品饮料' },
-  { code: '600276', name: '恒瑞医药', baseWeight: 4.8, sector: '医药' },
-  { code: '000651', name: '格力电器', baseWeight: 4.2, sector: '家电' },
-  { code: '000002', name: '万科A',    baseWeight: 3.5, sector: '房地产' },
-  { code: '603288', name: '海天味业', baseWeight: 3.2, sector: '食品饮料' },
+  { code: '002714', name: '牧原股份', baseWeight: 8.0, sector: '食品饮料' },
+  { code: '603345', name: '安井食品', baseWeight: 7.0, sector: '食品饮料' },
+  { code: '002847', name: '盐津铺子', baseWeight: 6.5, sector: '食品饮料' },
+  { code: '603027', name: '千禾味业', baseWeight: 6.0, sector: '食品饮料' },
+  { code: '000963', name: '华东医药', baseWeight: 5.5, sector: '医药' },
+  { code: '300595', name: '欧普康视', baseWeight: 5.0, sector: '医药' },
+  { code: '002032', name: '苏泊尔',   baseWeight: 4.5, sector: '家电' },
+  { code: '603486', name: '科沃斯',   baseWeight: 4.0, sector: '家电' },
+  { code: '002925', name: '盈趣科技', baseWeight: 3.5, sector: '家电' },
+  { code: '300896', name: '爱美客',   baseWeight: 3.0, sector: '医药' },
 ];
 
 /** 新能源类 */
+/** 新能源/光储/锂电类（保留龙头但分散权重） */
 const NEW_ENERGY_STOCKS: StockTemplate[] = [
-  { code: '300750', name: '宁德时代', baseWeight: 9.5, sector: '电力设备' },
-  { code: '002594', name: '比亚迪',   baseWeight: 8.0, sector: '汽车' },
-  { code: '601012', name: '隆基绿能', baseWeight: 6.8, sector: '电力设备' },
-  { code: '300274', name: '阳光电源', baseWeight: 6.2, sector: '电力设备' },
-  { code: '600438', name: '通威股份', baseWeight: 5.5, sector: '电力设备' },
-  { code: '300014', name: '亿纬锂能', baseWeight: 5.0, sector: '电力设备' },
-  { code: '002466', name: '天齐锂业', baseWeight: 4.5, sector: '有色金属' },
-  { code: '002460', name: '赣锋锂业', baseWeight: 4.2, sector: '有色金属' },
-  { code: '002812', name: '恩捷股份', baseWeight: 3.8, sector: '电力设备' },
-  { code: '300450', name: '先导智能', baseWeight: 3.5, sector: '机械' },
+  { code: '300750', name: '宁德时代', baseWeight: 7.5, sector: '电力设备' },
+  { code: '300274', name: '阳光电源', baseWeight: 7.0, sector: '电力设备' },
+  { code: '300014', name: '亿纬锂能', baseWeight: 6.5, sector: '电力设备' },
+  { code: '300763', name: '锦浪科技', baseWeight: 6.0, sector: '电力设备' },
+  { code: '688063', name: '派能科技', baseWeight: 5.5, sector: '电力设备' },
+  { code: '002518', name: '科士达',   baseWeight: 5.0, sector: '电力设备' },
+  { code: '300827', name: '上能电气', baseWeight: 4.5, sector: '电力设备' },
+  { code: '002459', name: '晶澳科技', baseWeight: 4.0, sector: '电力设备' },
+  { code: '002812', name: '恩捷股份', baseWeight: 3.5, sector: '电力设备' },
+  { code: '688116', name: '天奈科技', baseWeight: 3.0, sector: '能源材料' },
 ];
 
 /** 医疗类 */
+/** 创新药/医疗器械类 */
 const MEDICAL_STOCKS: StockTemplate[] = [
-  { code: '300760', name: '迈瑞医疗',   baseWeight: 9.0, sector: '医药' },
-  { code: '603259', name: '药明康德',   baseWeight: 7.8, sector: '医药' },
-  { code: '600276', name: '恒瑞医药',   baseWeight: 7.0, sector: '医药' },
-  { code: '300015', name: '爱尔眼科',   baseWeight: 6.2, sector: '医药' },
-  { code: '300122', name: '智飞生物',   baseWeight: 5.5, sector: '医药' },
-  { code: '000661', name: '长春高新',   baseWeight: 4.8, sector: '医药' },
-  { code: '300347', name: '泰格医药',   baseWeight: 4.2, sector: '医药' },
-  { code: '300759', name: '康龙化成',   baseWeight: 3.8, sector: '医药' },
-  { code: '000963', name: '华东医药',   baseWeight: 3.5, sector: '医药' },
-  { code: '002007', name: '华兰生物',   baseWeight: 3.0, sector: '医药' },
+  { code: '300760', name: '迈瑞医疗', baseWeight: 8.0, sector: '医药' },
+  { code: '688235', name: '百济神州', baseWeight: 7.5, sector: '医药' },
+  { code: '603259', name: '药明康德', baseWeight: 7.0, sector: '医药' },
+  { code: '300015', name: '爱尔眼科', baseWeight: 6.0, sector: '医药' },
+  { code: '300122', name: '智飞生物', baseWeight: 5.5, sector: '医药' },
+  { code: '688578', name: '艾力斯',   baseWeight: 5.0, sector: '医药' },
+  { code: '300347', name: '泰格医药', baseWeight: 4.5, sector: '医药' },
+  { code: '002821', name: '凯莱英',   baseWeight: 4.0, sector: '医药' },
+  { code: '688331', name: '荣昌生物', baseWeight: 3.5, sector: '医药' },
+  { code: '688185', name: '康希诺',   baseWeight: 3.0, sector: '医药' },
 ];
 
 /** 科技/TMT 类 */
+/** 科技/半导体/AI/机器人（聚焦高成长赛道，移除海康/京东方等大盘） */
 const TECH_STOCKS: StockTemplate[] = [
-  { code: '688981', name: '中芯国际', baseWeight: 8.5, sector: '电子' },
-  { code: '002415', name: '海康威视', baseWeight: 7.5, sector: '电子' },
-  { code: '002475', name: '立讯精密', baseWeight: 7.0, sector: '电子' },
-  { code: '000725', name: '京东方A',  baseWeight: 6.2, sector: '电子' },
-  { code: '000063', name: '中兴通讯', baseWeight: 5.5, sector: '通信' },
-  { code: '002371', name: '北方华创', baseWeight: 5.0, sector: '电子' },
-  { code: '603501', name: '韦尔股份', baseWeight: 4.5, sector: '电子' },
-  { code: '002241', name: '歌尔股份', baseWeight: 4.0, sector: '电子' },
-  { code: '002230', name: '科大讯飞', baseWeight: 3.5, sector: '计算机' },
-  { code: '002049', name: '紫光国微', baseWeight: 3.0, sector: '电子' },
+  { code: '688256', name: '寒武纪',   baseWeight: 8.0, sector: '电子' },
+  { code: '688041', name: '海光信息', baseWeight: 7.5, sector: '电子' },
+  { code: '300502', name: '新易盛',   baseWeight: 7.0, sector: '通信' },
+  { code: '300308', name: '中际旭创', baseWeight: 6.5, sector: '通信' },
+  { code: '002371', name: '北方华创', baseWeight: 6.0, sector: '电子' },
+  { code: '688017', name: '绿的谐波', baseWeight: 5.5, sector: '机械' },
+  { code: '002747', name: '埃斯顿',   baseWeight: 5.0, sector: '机械' },
+  { code: '603986', name: '兆易创新', baseWeight: 4.5, sector: '电子' },
+  { code: '300607', name: '拓斯达',   baseWeight: 4.0, sector: '机械' },
+  { code: '603083', name: '剑桥科技', baseWeight: 3.5, sector: '通信' },
 ];
 
 /** 金融类 */
+/** 金融/证券（保留头部但分散权重） */
 const FINANCIAL_STOCKS: StockTemplate[] = [
-  { code: '600036', name: '招商银行', baseWeight: 9.0, sector: '银行' },
-  { code: '601318', name: '中国平安', baseWeight: 8.5, sector: '非银行金融' },
-  { code: '601398', name: '工商银行', baseWeight: 7.5, sector: '银行' },
-  { code: '601939', name: '建设银行', baseWeight: 6.8, sector: '银行' },
-  { code: '601166', name: '兴业银行', baseWeight: 6.0, sector: '银行' },
-  { code: '601288', name: '农业银行', baseWeight: 5.2, sector: '银行' },
-  { code: '600030', name: '中信证券', baseWeight: 4.8, sector: '非银行金融' },
-  { code: '601601', name: '中国太保', baseWeight: 4.2, sector: '非银行金融' },
-  { code: '601628', name: '中国人寿', baseWeight: 3.8, sector: '非银行金融' },
-  { code: '300059', name: '东方财富', baseWeight: 3.2, sector: '非银行金融' },
+  { code: '600036', name: '招商银行', baseWeight: 8.0, sector: '银行' },
+  { code: '600919', name: '江苏银行', baseWeight: 7.0, sector: '银行' },
+  { code: '002142', name: '宁波银行', baseWeight: 6.5, sector: '银行' },
+  { code: '600926', name: '杭州银行', baseWeight: 6.0, sector: '银行' },
+  { code: '601838', name: '成都银行', baseWeight: 5.5, sector: '银行' },
+  { code: '300059', name: '东方财富', baseWeight: 5.0, sector: '非银行金融' },
+  { code: '600030', name: '中信证券', baseWeight: 4.5, sector: '非银行金融' },
+  { code: '601688', name: '华泰证券', baseWeight: 4.0, sector: '非银行金融' },
+  { code: '300033', name: '同花顺',   baseWeight: 3.5, sector: '非银行金融' },
+  { code: '601601', name: '中国太保', baseWeight: 3.0, sector: '非银行金融' },
 ];
 
 /** QDII 类（港股/中概互联） */
+/** QDII 类（中小市值港股，排除腾讯/阿里/美团/京东等巨头） */
 const QDII_STOCKS: StockTemplate[] = [
-  { code: '00700',  name: '腾讯控股', baseWeight: 10.0, sector: '传媒' },
-  { code: '09988',  name: '阿里巴巴', baseWeight: 9.0,   sector: '传媒' },
-  { code: '03690',  name: '美团',     baseWeight: 7.5,   sector: '传媒' },
-  { code: '09618',  name: '京东',     baseWeight: 6.5,   sector: '传媒' },
-  { code: 'PDD',    name: '拼多多',   baseWeight: 5.8,   sector: '传媒' },
-  { code: '09888',  name: '百度',     baseWeight: 5.0,   sector: '传媒' },
-  { code: '09999',  name: '网易',     baseWeight: 4.2,   sector: '传媒' },
-  { code: '01024',  name: '快手',     baseWeight: 3.8,   sector: '传媒' },
-  { code: '01810',  name: '小米',     baseWeight: 3.5,   sector: '电子' },
-  { code: '002594', name: '比亚迪',   baseWeight: 3.0,   sector: '汽车' },
+  { code: '01801',  name: '信达生物', baseWeight: 8.0, sector: '医药' },
+  { code: '02269',  name: '药明生物', baseWeight: 7.5, sector: '医药' },
+  { code: '06160',  name: '百济神州', baseWeight: 7.0, sector: '医药' },
+  { code: '02382',  name: '舜宇光学', baseWeight: 6.5, sector: '电子' },
+  { code: '09926',  name: '康方生物', baseWeight: 6.0, sector: '医药' },
+  { code: '00522',  name: 'ASMPT',    baseWeight: 5.5, sector: '电子' },
+  { code: '02018',  name: '瑞声科技', baseWeight: 5.0, sector: '电子' },
+  { code: '02013',  name: '微盟集团', baseWeight: 4.5, sector: '计算机' },
+  { code: '09626',  name: '哔哩哔哩', baseWeight: 4.0, sector: '传媒' },
+  { code: '09899',  name: '云音乐',   baseWeight: 3.5, sector: '传媒' },
 ];
 
 /** 混合型默认 */
+/** 混合型默认（中小盘成长风格） */
 const DEFAULT_STOCKS: StockTemplate[] = [
-  { code: '600519', name: '贵州茅台', baseWeight: 6.0, sector: '食品饮料' },
-  { code: '601318', name: '中国平安', baseWeight: 5.5, sector: '非银行金融' },
-  { code: '300750', name: '宁德时代', baseWeight: 5.0, sector: '电力设备' },
-  { code: '300760', name: '迈瑞医疗', baseWeight: 4.5, sector: '医药' },
-  { code: '002415', name: '海康威视', baseWeight: 4.0, sector: '电子' },
-  { code: '600036', name: '招商银行', baseWeight: 3.8, sector: '银行' },
-  { code: '000858', name: '五粮液',   baseWeight: 3.5, sector: '食品饮料' },
-  { code: '002594', name: '比亚迪',   baseWeight: 3.2, sector: '汽车' },
-  { code: '688981', name: '中芯国际', baseWeight: 2.8, sector: '电子' },
-  { code: '000333', name: '美的集团', baseWeight: 2.5, sector: '家电' },
+  { code: '300502', name: '新易盛',   baseWeight: 6.0, sector: '通信' },
+  { code: '688017', name: '绿的谐波', baseWeight: 5.5, sector: '机械' },
+  { code: '300308', name: '中际旭创', baseWeight: 5.0, sector: '通信' },
+  { code: '688041', name: '海光信息', baseWeight: 4.5, sector: '电子' },
+  { code: '002747', name: '埃斯顿',   baseWeight: 4.0, sector: '机械' },
+  { code: '603345', name: '安井食品', baseWeight: 3.5, sector: '食品饮料' },
+  { code: '688063', name: '派能科技', baseWeight: 3.0, sector: '电力设备' },
+  { code: '300595', name: '欧普康视', baseWeight: 2.8, sector: '医药' },
+  { code: '688256', name: '寒武纪',   baseWeight: 2.5, sector: '电子' },
+  { code: '301205', name: '联特科技', baseWeight: 2.0, sector: '通信' },
 ];
 
 // ============================================================

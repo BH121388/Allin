@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
-import { getMockNAV, getMockFunds } from '../adapters/eastmoney.js';
+import { getMockNAV, getMockFunds, fetchFundDetail } from '../adapters/eastmoney.js';
 import { scoreFund, scoreAllFunds } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
@@ -250,7 +250,7 @@ router.get('/portfolio/:code/invest', (req: Request, res: Response) => {
 // GET /api/portfolio/:code/takeProfit — 止盈评估
 // ============================================================
 
-router.get('/portfolio/:code/takeProfit', (req: Request, res: Response) => {
+router.get('/portfolio/:code/takeProfit', async (req: Request, res: Response) => {
   try {
     const code = req.params.code as string;
 
@@ -266,9 +266,20 @@ router.get('/portfolio/:code/takeProfit', (req: Request, res: Response) => {
       return;
     }
 
-    // 计算当前收益
-    const navData = getMockNAV(code);
-    const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+    // 计算当前收益（使用真实净值，降级为 mock）
+    let currentNav = row.cost_nav;
+    try {
+      const detail = await fetchFundDetail(code);
+      if (detail && detail.navHistory.length > 0) {
+        currentNav = detail.navHistory[detail.navHistory.length - 1].nav;
+      }
+    } catch {
+      // fall back to mock
+    }
+    if (currentNav === row.cost_nav) {
+      const navData = getMockNAV(code);
+      currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+    }
     const currentValue = row.shares * currentNav;
     const pnl = currentValue - row.amount;
     const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
@@ -355,7 +366,7 @@ router.delete('/portfolio/:code', (req: Request, res: Response) => {
 // GET /api/portfolio — 获取所有持仓（含实时评分与盈亏）
 // ============================================================
 
-router.get('/portfolio', (_req: Request, res: Response) => {
+router.get('/portfolio', async (_req: Request, res: Response) => {
   try {
     const db = getDb();
     const rows = db.prepare('SELECT * FROM portfolio ORDER BY added_at DESC').all() as PortfolioRow[];
@@ -373,7 +384,15 @@ router.get('/portfolio', (_req: Request, res: Response) => {
     const navDataByCode = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
 
     for (const row of rows) {
-      const navData = getMockNAV(row.code);
+      let navData = getMockNAV(row.code);
+      try {
+        const detail = await fetchFundDetail(row.code);
+        if (detail && detail.navHistory.length > 0) {
+          navData = detail.navHistory;
+        }
+      } catch {
+        // fall back to mock
+      }
       navDataByCode.set(row.code, navData);
       let fundInfo: FundInfo;
       const existing = fundMap.get(row.code);
