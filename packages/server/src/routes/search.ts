@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, FundInfo, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
-import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, estimateIntradayNAV, type NAVEntry } from '../adapters/eastmoney.js';
 import { scoreFund, scoreAllFunds, scoreAllFundsUnified, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
@@ -76,6 +76,21 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
     } catch {
       // 降级为 mock
     }
+
+    // 2.5 盘中估算净值
+    let todayChange = 0;
+    try {
+      const est = await estimateIntradayNAV(code);
+      if (est) {
+        todayChange = est.weightedChange;
+        if (currentNav != null && todayChange !== 0) {
+          currentNav = Math.round(currentNav * (1 + todayChange / 100) * 10000) / 10000;
+        } else if (currentNav == null) {
+          currentNav = est.estimatedNav;
+          navDate = est.navDate;
+        }
+      }
+    } catch { /* skip */ }
 
     // 3. 统一评分 — 确保被查询的基金在评分列表中
     const scoreFunds: FundInfo[] = [...getMockFunds()];
