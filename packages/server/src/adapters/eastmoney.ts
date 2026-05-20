@@ -91,14 +91,26 @@ function parseFundListJS(text: string): string[][] | null {
  * 从天天基金获取全量基金列表。
  * 失败自动降级为 mock 数据。
  */
+// 基金列表缓存（10 分钟，列表不常变）
+let cachedFundList: FundInfo[] | null = null;
+let cachedFundListAt = 0;
+const FUND_LIST_CACHE_TTL_MS = 10 * 60 * 1000;
+
 export async function fetchAllFunds(): Promise<FundInfo[]> {
+  if (cachedFundList && Date.now() - cachedFundListAt < FUND_LIST_CACHE_TTL_MS) {
+    return cachedFundList;
+  }
+
   console.log('[eastmoney] 正在从天天基金获取基金列表...');
 
   const response = await fetchWithTimeout(FUND_LIST_URL);
 
   if (!response || !response.ok) {
     console.warn('[eastmoney] 基金列表 API 请求失败，降级为 mock 数据');
-    return getMockFunds();
+    const result = getMockFunds();
+    cachedFundList = result;
+    cachedFundListAt = Date.now();
+    return result;
   }
 
   try {
@@ -107,7 +119,10 @@ export async function fetchAllFunds(): Promise<FundInfo[]> {
 
     if (!rows || rows.length === 0) {
       console.warn('[eastmoney] 基金列表解析失败，降级为 mock 数据');
-      return getMockFunds();
+      const result = getMockFunds();
+      cachedFundList = result;
+      cachedFundListAt = Date.now();
+      return result;
     }
 
     // API 返回格式: [code, pinyin_abbr, name, type, pinyin_full]
@@ -124,10 +139,15 @@ export async function fetchAllFunds(): Promise<FundInfo[]> {
     }));
 
     console.log(`[eastmoney] 成功获取 ${funds.length} 只基金`);
+    cachedFundList = funds;
+    cachedFundListAt = Date.now();
     return funds;
   } catch (err) {
     console.warn('[eastmoney] 基金列表处理异常，降级为 mock 数据:', err);
-    return getMockFunds();
+    const result = getMockFunds();
+    cachedFundList = result;
+    cachedFundListAt = Date.now();
+    return result;
   }
 }
 
@@ -204,7 +224,22 @@ export interface FundDetail {
 
 const FUND_DETAIL_URL = 'http://fund.eastmoney.com/pingzhongdata/';
 
+// 短期缓存：同一基金数据复用，保证各页面评分一致
+// 成功缓存 5 分钟，失败缓存 30 秒（避免反复失败产生不一致）
+const detailCache = new Map<string, { data: FundDetail | null; at: number }>();
+const DETAIL_CACHE_TTL_MS = 5 * 60 * 1000;
+const DETAIL_CACHE_FAIL_TTL_MS = 30 * 1000;
+
 export async function fetchFundDetail(code: string): Promise<FundDetail | null> {
+  const cached = detailCache.get(code);
+  if (cached) {
+    const ttl = cached.data ? DETAIL_CACHE_TTL_MS : DETAIL_CACHE_FAIL_TTL_MS;
+    if (Date.now() - cached.at < ttl) {
+      return cached.data;
+    }
+    // 过期，清除重新请求
+    detailCache.delete(code);
+  }
   try {
     const url = `${FUND_DETAIL_URL}${code}.js`;
     const resp = await fetchWithTimeout(url);
@@ -244,9 +279,13 @@ export async function fetchFundDetail(code: string): Promise<FundDetail | null> 
       }
     }
 
-    return { code, name, returns: { ret1m, ret3m, ret6m, ret1y }, stockCodes, navHistory, dataDate: new Date().toISOString().slice(0, 10) };
+    const result = { code, name, returns: { ret1m, ret3m, ret6m, ret1y }, stockCodes, navHistory, dataDate: new Date().toISOString().slice(0, 10) };
+    detailCache.set(code, { data: result, at: Date.now() });
+    return result;
   } catch (err) {
     console.warn(`[eastmoney] 获取基金 ${code} 详情失败:`, (err as Error).message);
+    // 失败也缓存（短期），防止同一次会话中交替成功/失败导致评分不一致
+    detailCache.set(code, { data: null, at: Date.now() });
     return null;
   }
 }

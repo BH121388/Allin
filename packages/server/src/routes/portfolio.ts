@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
-import { getMockNAV, getMockFunds, fetchFundDetail } from '../adapters/eastmoney.js';
-import { scoreFund, scoreAllFunds, scoreAllFundsUnified } from '../services/scoring.js';
+import { getMockNAV, getMockFunds, fetchFundDetail, fetchAllFunds } from '../adapters/eastmoney.js';
+import { scoreAllFundsUnified } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
 import type { TakeProfitRule, TakeProfitAction } from '../services/takeProfit.js';
@@ -371,14 +371,23 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     const db = getDb();
     const rows = db.prepare('SELECT * FROM portfolio ORDER BY added_at DESC').all() as PortfolioRow[];
 
-    const mockFunds = getMockFunds();
-    const fundMap = new Map(mockFunds.map((f) => [f.code, f]));
+    // 构建 FundInfo 查找表（mock + 真实基金数据）
+    const allRealFunds = await fetchAllFunds();
+    const fundMap = new Map<string, FundInfo>();
+    for (const f of getMockFunds()) fundMap.set(f.code, f);
+    for (const f of allRealFunds) {
+      if (!fundMap.has(f.code)) fundMap.set(f.code, f);
+      else {
+        // 合并：mock 补充 type/manager 等真实数据缺失的字段
+        const existing = fundMap.get(f.code)!;
+        fundMap.set(f.code, { ...f, ...existing });
+      }
+    }
 
     const holdings: PortfolioHolding[] = [];
     let totalValue = 0;
     let totalCost = 0;
 
-    // 收集所有持仓的 FundInfo 和 NAV，用于统一评分
     const fundInfos: FundInfo[] = [];
     const navDataByCode = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
 
@@ -392,18 +401,15 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
       } catch {
         // fall back to mock
       }
-      let fundInfo: FundInfo;
-      const existing = fundMap.get(row.code);
-      if (existing) {
-        fundInfo = existing;
-      } else {
-        fundInfo = {
-          code: row.code, name: row.name, type: '', manager: '',
-          tenure: '', managerReturn: '', scale: 0, inception: '', company: '',
-        };
-      }
-      fundInfos.push(fundInfo);
       navDataByCode.set(row.code, navData);
+
+      // 优先从 fundMap 获取完整 FundInfo，缺失时用数据库记录补底
+      const existing = fundMap.get(row.code);
+      const fundInfo: FundInfo = existing || {
+        code: row.code, name: row.name, type: '', manager: '',
+        tenure: '', managerReturn: '', scale: 0, inception: '', company: '',
+      };
+      fundInfos.push(fundInfo);
     }
 
     // 批量评分确保与推荐一致的交叉归一化

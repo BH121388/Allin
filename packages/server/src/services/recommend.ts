@@ -71,12 +71,10 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   const allFunds = await fetchAllFunds();
   console.log(`[recommend] 获取到 ${allFunds.length} 只基金`);
 
-  // Step 2: 筛选 — 仅混合型 + 热门赛道关键词
+  // Step 2: 筛选 — 仅混合型/灵活配置型 + 热门赛道关键词
   const mixedFunds = allFunds.filter(f => {
     const type = (f.type || '').toLowerCase();
-    // 包含"混合"
-    if (!type.includes('混合')) return false;
-    // 且名称含热门赛道关键词
+    if (!type.includes('混合') && !type.includes('灵活配置')) return false;
     return isHotSector(f.name);
   });
 
