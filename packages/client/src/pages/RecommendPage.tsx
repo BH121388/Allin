@@ -26,7 +26,7 @@ export default function RecommendPage() {
               Allin 基金智能投资决策工具
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              每日推荐 Top 5
+              短期动量 Top 10
               {generatedAt && (
                 <span className="ml-3">
                   生成时间: {formatTime(generatedAt)}

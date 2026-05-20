@@ -58,6 +58,10 @@ export interface FundAnalysis extends FundInfo {
   peerComparison: PeerComparison;
   currentNav?: number;    // 当前单位净值
   navDate?: string;       // 净值日期
+  buyDate?: string;       // 建议买入日期
+  sellDate?: string;      // 建议清仓日期
+  stopLoss?: number;      // 止损价
+  targetReturn?: number;  // 目标收益率(%)
 }
 
 // ============================================================
