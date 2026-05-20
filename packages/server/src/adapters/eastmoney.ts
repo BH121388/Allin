@@ -276,6 +276,80 @@ export async function fetchFundHoldings(code: string): Promise<HoldingDetail[]> 
   }
 }
 
+// ============================================================
+// 股票实时行情 — 从新浪接口获取涨跌幅
+// ============================================================
+
+// 行情缓存（2 分钟）
+const quoteCache = new Map<string, { data: number | null; at: number }>();
+const QUOTE_CACHE_TTL_MS = 2 * 60 * 1000;
+
+function marketPrefix(code: string): string {
+  if (code.startsWith('6')) return 'sh';
+  return 'sz';
+}
+
+/**
+ * 获取单只股票当日涨跌幅（%）。
+ * 从新浪行情接口解析，失败返回 null。
+ */
+async function fetchStockChangePct(code: string): Promise<number | null> {
+  const cached = quoteCache.get(code);
+  if (cached && Date.now() - cached.at < QUOTE_CACHE_TTL_MS) return cached.data;
+
+  try {
+    const prefix = marketPrefix(code);
+    const url = `https://hq.sinajs.cn/list=${prefix}${code}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(url, {
+      headers: { Referer: 'https://finance.sina.com.cn/' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp || !resp.ok) return null;
+
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const iconv = await import('iconv-lite');
+    const text = iconv.default.decode(buf, 'gbk');
+
+    const m = text.match(/"([^"]*)"/);
+    if (!m) return null;
+    const fields = m[1].split(',');
+    if (fields.length < 32) return null;
+
+    const price = parseFloat(fields[3]);
+    const prevClose = parseFloat(fields[2]);
+    let changePct = 0;
+    if (prevClose > 0 && price > 0) {
+      changePct = ((price - prevClose) / prevClose) * 100;
+    }
+
+    const result = Math.round(changePct * 100) / 100;
+    quoteCache.set(code, { data: result, at: Date.now() });
+    return result;
+  } catch {
+    quoteCache.set(code, { data: null, at: Date.now() });
+    return null;
+  }
+}
+
+/** 批量获取涨跌幅（并发 5） */
+export async function fetchStockChanges(codes: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  for (let i = 0; i < codes.length; i += 5) {
+    const batch = codes.slice(i, i + 5);
+    const items = await Promise.allSettled(batch.map(c => fetchStockChangePct(c)));
+    for (let j = 0; j < items.length; j++) {
+      const it = items[j];
+      if (it.status === 'fulfilled' && it.value != null) {
+        result.set(batch[j], it.value);
+      }
+    }
+  }
+  return result;
+}
+
 // 短期缓存：同一基金数据复用，保证各页面评分一致
 // 成功缓存 5 分钟，失败缓存 30 秒（避免反复失败产生不一致）
 const detailCache = new Map<string, { data: FundDetail | null; at: number }>();
