@@ -236,7 +236,7 @@ export async function fetchFundDetail(code: string): Promise<FundDetail | null> 
       // 取最近 90 条
       for (const item of rawNavs.slice(-90)) {
         navHistory.push({
-          date: new Date(item.x).toISOString().slice(0, 10),
+          date: (d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`)(new Date(item.x)),
           nav: Math.round(item.y * 10000) / 10000,
           accNav: Math.round(item.y * 10000) / 10000,
           dailyReturn: item.equityReturn || 0,

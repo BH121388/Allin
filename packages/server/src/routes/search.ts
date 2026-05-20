@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
-import { fetchAllFunds, getMockFunds, getMockNAV, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, type NAVEntry } from '../adapters/eastmoney.js';
 import { scoreFund, scoreAllFunds, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
@@ -61,8 +61,21 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
       return;
     }
 
-    // 2. 获取净值数据
-    const navData = getMockNAV(code);
+    // 2. 获取净值数据（优先真实 API，降级为 mock）
+    let navData = getMockNAV(code);
+    let currentNav: number | undefined;
+    let navDate: string | undefined;
+    try {
+      const detail = await fetchFundDetail(code);
+      if (detail && detail.navHistory.length > 0) {
+        navData = detail.navHistory;
+        const latest = detail.navHistory[detail.navHistory.length - 1];
+        currentNav = latest.nav;
+        navDate = latest.date;
+      }
+    } catch {
+      // 降级为 mock
+    }
 
     // 3. 六维评分 — 使用与推荐一致的批量交叉归一化
     const mockFunds = getMockFunds();
@@ -145,6 +158,9 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
       sectorTags,
       // 同业比较
       peerComparison,
+      // 当前净值
+      currentNav,
+      navDate,
     };
 
     const body: ApiResponse<FundAnalysis> = {

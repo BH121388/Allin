@@ -120,6 +120,12 @@ function FundReport({ fund }: { fund: FundAnalysis }) {
               <p className={cn('text-xs font-medium mt-0.5', grade.color)}>
                 {grade.stars} {grade.label}
               </p>
+              {fund.currentNav != null && (
+                <p className="text-xs text-slate-500 mt-1">
+                  净值 <span className="font-mono font-medium text-slate-700">{fund.currentNav.toFixed(4)}</span>
+                  {fund.navDate && <span className="ml-1 text-slate-400">{fund.navDate}</span>}
+                </p>
+              )}
             </div>
           </div>
         </CardHeader>

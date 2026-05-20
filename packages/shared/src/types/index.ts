@@ -56,6 +56,8 @@ export interface FundAnalysis extends FundInfo {
   holdings: TopHolding[];
   sectorTags: string[];   // 行业标签
   peerComparison: PeerComparison;
+  currentNav?: number;    // 当前单位净值
+  navDate?: string;       // 净值日期
 }
 
 // ============================================================
