@@ -280,9 +280,72 @@ export async function fetchFundHoldings(code: string): Promise<HoldingDetail[]> 
 // 股票实时行情 — 从新浪接口获取涨跌幅
 // ============================================================
 
-// 行情缓存（2 分钟）
+// 行情缓存（1 分钟，快速响应刷新）
 const quoteCache = new Map<string, { data: number | null; at: number }>();
-const QUOTE_CACHE_TTL_MS = 2 * 60 * 1000;
+const QUOTE_CACHE_TTL_MS = 60 * 1000;
+
+/**
+ * 估算基金盘中实时净值。
+ * 基于最新披露净值 + 十大重仓股实时涨跌幅加权。
+ * 返回 { estimatedNav, weightedChange, navDate }
+ */
+export async function estimateIntradayNAV(code: string): Promise<{
+  estimatedNav: number;
+  lastNav: number;
+  weightedChange: number;
+  navDate: string;
+} | null> {
+  try {
+    const [detail, holdings] = await Promise.all([
+      fetchFundDetail(code),
+      fetchFundHoldings(code),
+    ]);
+    if (!detail || detail.navHistory.length === 0) return null;
+
+    const lastEntry = detail.navHistory[detail.navHistory.length - 1];
+    const lastNav = lastEntry.nav;
+    const navDate = lastEntry.date;
+
+    // 获取重仓股实时涨跌
+    const stockCodes = holdings.length > 0
+      ? holdings.map(h => h.stockCode)
+      : detail.stockCodes.slice(0, 10);
+    const changes = await fetchStockChanges(stockCodes);
+
+    // 加权计算
+    let weightedChange = 0;
+    if (holdings.length > 0) {
+      let totalWeight = 0;
+      for (const h of holdings) {
+        const ch = changes.get(h.stockCode) ?? 0;
+        weightedChange += h.weight * ch;
+        totalWeight += h.weight;
+      }
+      weightedChange = totalWeight > 0 ? weightedChange / totalWeight : 0;
+    } else if (stockCodes.length > 0) {
+      // 无权重时等权估算
+      let sum = 0, count = 0;
+      for (const sc of stockCodes) {
+        const ch = changes.get(sc);
+        if (ch != null) { sum += ch; count++; }
+      }
+      weightedChange = count > 0 ? sum / count : 0;
+    }
+
+    const estimatedNav = lastNav * (1 + weightedChange / 100);
+
+    return {
+      estimatedNav: Math.round(estimatedNav * 10000) / 10000,
+      lastNav,
+      weightedChange: Math.round(weightedChange * 100) / 100,
+      navDate,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// 行情缓存（1 分钟）
 
 function marketPrefix(code: string): string {
   if (code.startsWith('6')) return 'sh';

@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { FundInfo, FundAnalysis, FundScore, SignalResult, RiskMetrics, PeerComparison } from '@allin/shared';
-import { getMockFunds, getMockNAV, fetchFundDetail, fetchAllFunds, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
+import { getMockFunds, getMockNAV, fetchFundDetail, fetchAllFunds, estimateIntradayNAV, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
 import { scoreAllFundsUnified, getGrade } from './scoring.js';
 import { getDb } from '../db/index.js';
 
@@ -144,7 +144,27 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   }
   console.log(`[recommend] Step 3: 净值获取完成 ${navMap.size} 只`);
 
-  // Step 4: 统一评分（收益+风险平衡）
+  // Step 3.5: 注入今日盘中估算（追加一条合成今日净值到 navData）
+  const todayStr = new Date().toISOString().slice(0, 10);
+  for (const c of candidates) {
+    const nav = navMap.get(c.code);
+    if (!nav || nav.length === 0) continue;
+    const last = nav[nav.length - 1];
+    if (last.date === todayStr) continue; // 已有今日数据
+    try {
+      const est = await estimateIntradayNAV(c.code);
+      if (est && est.weightedChange !== 0) {
+        nav.push({
+          date: todayStr,
+          nav: est.estimatedNav,
+          accNav: est.estimatedNav,
+          dailyReturn: est.weightedChange,
+        });
+      }
+    } catch { /* skip */ }
+  }
+
+  // Step 4: 统一评分（收益+风险平衡，含今日盘中估算）
   const scoreMap = scoreAllFundsUnified(candidates, navMap);
   console.log(`[recommend] Step 4: 统一评分完成 ${scoreMap.size} 只`);
 

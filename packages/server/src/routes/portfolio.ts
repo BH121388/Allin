@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
-import { getMockNAV, getMockFunds, fetchFundDetail, fetchAllFunds } from '../adapters/eastmoney.js';
+import { getMockNAV, getMockFunds, fetchFundDetail, fetchAllFunds, estimateIntradayNAV } from '../adapters/eastmoney.js';
 import { scoreAllFundsUnified } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
@@ -35,6 +35,11 @@ interface PortfolioHolding {
   score: FundScore;
   signal: SignalResult;
   addedAt: string;
+  todayChange?: number;
+  todayPnl?: number;
+  lastNAV?: number;
+  navDate?: string;
+  sellSuggestion?: string;
 }
 
 // ============================================================
@@ -415,15 +420,41 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     // 批量评分确保与推荐一致的交叉归一化
     const scores = scoreAllFundsUnified(fundInfos, navDataByCode);
 
-    for (const row of rows) {
+    // 并行获取所有持仓的盘中估算净值
+    const intradayResults = await Promise.allSettled(
+      rows.map(r => estimateIntradayNAV(r.code)),
+    );
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const navData = navDataByCode.get(row.code) || [];
-      const currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+      const lastNAV = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+
+      // 盘中估算净值（优先），否则用昨收净值
+      const intra = intradayResults[i];
+      const estimated = (intra.status === 'fulfilled' && intra.value) ? intra.value : null;
+      const currentNav = estimated?.estimatedNav ?? lastNAV;
+      const todayChange = estimated?.weightedChange ?? 0;
+      const navDate = estimated?.navDate ?? (navData.length > 0 ? navData[navData.length - 1].date : '');
+
       const currentValue = row.shares * currentNav;
       const pnl = currentValue - row.amount;
       const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
+      const todayPnl = row.shares * lastNAV * (todayChange / 100);
 
       const score = scores.get(row.code) || { momentum: 0, riskControl: 0, riskAdjusted: 0, manager: 0, scale: 0, sectorMatch: 0, total: 0 };
       const signal = getSignal(score.total);
+
+      // 卖出建议：持有满 7 天 + 收益率达标
+      const addedDate = new Date(row.added_at);
+      const holdingDays = Math.floor((Date.now() - addedDate.getTime()) / 86400000);
+      const sellDate = new Date(addedDate);
+      sellDate.setDate(sellDate.getDate() + 14);
+      const sellSuggestion = pnlPercent >= 5
+        ? `收益已达+${pnlPercent.toFixed(1)}%，建议择机止盈`
+        : pnlPercent <= -5
+          ? '亏损超5%，建议评估是否止损'
+          : `目标清仓日 ${sellDate.toISOString().slice(0, 10)}（持有14天）`;
 
       holdings.push({
         id: row.id,
@@ -432,13 +463,19 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
         amount: row.amount,
         costNav: row.cost_nav,
         shares: row.shares,
-        currentNav,
+        currentNav: Math.round(currentNav * 10000) / 10000,
         currentValue: Math.round(currentValue * 100) / 100,
         pnl: Math.round(pnl * 100) / 100,
         pnlPercent: Math.round(pnlPercent * 100) / 100,
         score,
         signal,
         addedAt: row.added_at,
+        // 扩展字段
+        todayChange: Math.round(todayChange * 100) / 100,
+        todayPnl: Math.round(todayPnl * 100) / 100,
+        lastNAV: Math.round(lastNAV * 10000) / 10000,
+        navDate,
+        sellSuggestion,
       });
 
       totalValue += currentValue;
