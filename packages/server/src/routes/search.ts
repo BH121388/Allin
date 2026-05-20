@@ -163,6 +163,8 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
       // 当前净值
       currentNav,
       navDate,
+      // 近期净值走势（最近 30 条，供前端折线图）
+      navHistory: navData.slice(-30).map(e => ({ date: e.date, nav: e.nav })),
     };
 
     const body: ApiResponse<FundAnalysis> = {

@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import SignalBadge from '@/components/portfolio/SignalBadge';
 import HoldingsPanel from '@/components/fund/HoldingsPanel';
+import NavTrendChart from '@/components/fund/NavTrendChart';
 import { cn } from '@/lib/utils';
 import type { FundAnalysis } from '@allin/shared';
 
@@ -79,19 +80,6 @@ function RiskMetricItem({ label, value, unit }: { label: string; value: number; 
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-mono font-medium text-slate-800">
         {value}{unit || '%'}
-      </span>
-    </div>
-  );
-}
-
-function HoldingTag({ stockName, weight, changeToday }: { stockName: string; weight: number; changeToday: number }) {
-  const changeColor = changeToday >= 0 ? 'text-emerald-600' : 'text-red-500';
-  return (
-    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-full text-xs">
-      <span className="font-medium text-slate-700">{stockName}</span>
-      <span className="text-slate-400">{weight}%</span>
-      <span className={cn('font-mono', changeColor)}>
-        {changeToday >= 0 ? '+' : ''}{changeToday}%
       </span>
     </div>
   );
@@ -272,28 +260,15 @@ function FundReport({ fund }: { fund: FundAnalysis }) {
         </CardContent>
       </Card>
 
-      {/* Holdings + Sectors + Peer Comparison */}
+      {/* Chart + Sectors + Peer Comparison */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Holdings */}
-        {fund.holdings && fund.holdings.length > 0 && (
-          <Card className="md:col-span-2">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">重仓持股</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {fund.holdings.map((h) => (
-                  <HoldingTag
-                    key={h.stockCode}
-                    stockName={h.stockName}
-                    weight={h.weight}
-                    changeToday={h.changeToday}
-                  />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* NAV Trend Chart */}
+        <Card className="md:col-span-2 overflow-hidden">
+          <NavTrendChart
+            data={fund.navHistory || []}
+            currentNav={fund.currentNav}
+          />
+        </Card>
 
         {/* Sector Tags + Peer Comparison */}
         <Card>

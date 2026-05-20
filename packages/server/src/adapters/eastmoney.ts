@@ -223,6 +223,58 @@ export interface FundDetail {
 }
 
 const FUND_DETAIL_URL = 'http://fund.eastmoney.com/pingzhongdata/';
+const FUND_HOLDINGS_URL = 'https://fundf10.eastmoney.com/FundArchivesDatas.aspx';
+
+export interface HoldingDetail {
+  stockCode: string;
+  stockName: string;
+  weight: number;    // 占净值比例 (%)
+  shares: number;    // 持股数（万股）
+  marketValue: number; // 持仓市值（万元）
+}
+
+/**
+ * 从天天基金获取基金真实持仓明细（含权重）。
+ */
+export async function fetchFundHoldings(code: string): Promise<HoldingDetail[]> {
+  try {
+    const url = `${FUND_HOLDINGS_URL}?type=jjcc&code=${code}&topline=10`;
+    const resp = await fetchWithTimeout(url);
+    if (!resp || !resp.ok) return [];
+    const text = await resp.text();
+
+    // 提取 var apidata={...}
+    const start = text.indexOf('var apidata=');
+    if (start < 0) return [];
+    const jsonPart = text.substring(start + 'var apidata='.length);
+    let depth = 0, end = 0;
+    for (let i = 0; i < jsonPart.length; i++) {
+      if (jsonPart[i] === '{') depth++;
+      if (jsonPart[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+    }
+    const obj = eval('(' + jsonPart.substring(0, end) + ')') as { content: string };
+    const html = obj.content as string;
+
+    // 解析表格行：列 1=代码, 2=名称, 6=占比, 7=持股数, 8=市值
+    const result: HoldingDetail[] = [];
+    const trs = html.split('</tr>');
+    for (const tr of trs) {
+      const tds = tr.match(/<td[^>]*>(.*?)<\/td>/gs);
+      if (!tds || tds.length < 8) continue;
+      const cells = tds.map(td => td.replace(/<[^>]*>/g, '').trim());
+      const code = cells[1];
+      if (!/^\d{6}$/.test(code)) continue;
+      const name = cells[2];
+      const weight = parseFloat(cells[6]) || 0;
+      const shares = parseFloat(cells[7]) || 0;
+      const marketValue = parseFloat(cells[8]) || 0;
+      if (weight > 0) result.push({ stockCode: code, stockName: name, weight, shares, marketValue });
+    }
+    return result.slice(0, 10);
+  } catch {
+    return [];
+  }
+}
 
 // 短期缓存：同一基金数据复用，保证各页面评分一致
 // 成功缓存 5 分钟，失败缓存 30 秒（避免反复失败产生不一致）

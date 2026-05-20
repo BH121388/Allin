@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import type { ApiResponse } from '@allin/shared';
 import type { HoldingsDetail } from '../services/holdings.js';
 import { generateHoldings } from '../services/holdings.js';
-import { fetchAllFunds, getMockFunds, fetchFundDetail, lookupStockName } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, fetchFundDetail, fetchFundHoldings, lookupStockName } from '../adapters/eastmoney.js';
 
 const router = Router();
 
@@ -53,25 +53,30 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
     const detail = await fetchFundDetail(code);
     let data: HoldingsDetail;
 
+    // 并行获取持仓明细（含真实占比）
+    const holdingsDetail = await fetchFundHoldings(code);
+
     if (detail && detail.stockCodes.length > 0) {
       // 有真实持仓数据
-      const rawHoldings = detail.stockCodes.slice(0, 10).map((sc) => {
+      const realHoldings = detail.stockCodes.slice(0, 10).map((sc) => {
         const name = lookupStockName(sc) || sc;
-        return { stockCode: sc, stockName: name };
+        const hd = holdingsDetail.find(h => h.stockCode === sc);
+        return {
+          stockCode: sc,
+          stockName: name,
+          weight: hd?.weight ?? Math.round((100 / Math.min(10, detail.stockCodes.length)) * 100) / 100,
+          changeToday: 0,
+        };
       });
 
-      const perWeight = Math.round((100 / rawHoldings.length) * 100) / 100;
-      const realHoldings = rawHoldings.map(h => ({
-        ...h,
-        weight: perWeight,
-        changeToday: 0,
-      }));
+      // 加权涨跌幅（暂无实时行情，保 0）
+      const weightedChange = 0;
 
       data = {
         fundCode: code,
         fundName: fund.name || detail.name,
         holdings: realHoldings,
-        weightedChange: 0,
+        weightedChange,
         sectorTags: deriveSectorTagsSimple(realHoldings.map(h => h.stockName)),
         sectorBreakdown: [],
         style: '',
