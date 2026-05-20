@@ -1,14 +1,13 @@
 // ============================================================
-// 短期动量推荐管道 — 每日 Top 10
+// 短期动量推荐管道 — 每日 Top 10（仅混合型，≥50分）
 //
 // 策略重心：近 5-15 日收益动量占 70%，风险调整 15%，
 // 技术趋势 10%，波动率惩罚 5%。附带买入/清仓时机。
+// 基金池来自天天基金实时全量数据，仅筛选混合型基金。
 // ============================================================
 
-import type { FundInfo, FundAnalysis, FundScore, SignalResult, RiskMetrics, PeerComparison, TopHolding } from '@allin/shared';
-import { SIGNAL_THRESHOLDS } from '@allin/shared';
-import { getMockFunds, getMockNAV, fetchFundDetail, type NAVEntry } from '../adapters/eastmoney.js';
-import { scoreAllFunds, getGrade } from './scoring.js';
+import type { FundInfo, FundAnalysis, FundScore, SignalResult, RiskMetrics, PeerComparison } from '@allin/shared';
+import { getMockFunds, getMockNAV, fetchFundDetail, fetchAllFunds, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
 import { getDb } from '../db/index.js';
 
 // ============================================================
@@ -19,6 +18,7 @@ export interface DailyRecommendations {
   recommendations: FundAnalysis[];
   generatedAt: string;
   source: string;
+  totalScanned: number;
 }
 
 export async function getDailyRecommendations(
@@ -30,59 +30,136 @@ export async function getDailyRecommendations(
     const cached = readCachedRecommendations(today);
     if (cached.length > 0) {
       console.log(`[recommend] 返回缓存推荐（${cached.length} 只基金）`);
-      return { recommendations: cached, generatedAt: today, source: 'cache' };
+      return { recommendations: cached, generatedAt: today, source: 'cache', totalScanned: 0 };
     }
   }
 
   console.log('[recommend] 开始执行短期动量推荐管道...');
-  const recommendations = await runPipeline();
+  const result = await runPipeline();
+  const { recommendations, totalScanned } = result;
   storeRecommendations(today, recommendations);
-  console.log(`[recommend] 推荐管道完成，输出 ${recommendations.length} 只基金`);
-  return { recommendations, generatedAt: today, source: 'live' };
+  console.log(`[recommend] 完成：扫描 ${totalScanned} 只 → 输出 ${recommendations.length} 只`);
+  return { recommendations, generatedAt: today, source: 'live', totalScanned };
 }
 
 // ============================================================
-// 短期动量管道
+// 混合型基金关键词过滤（聚焦成长赛道）
 // ============================================================
 
-async function runPipeline(): Promise<FundAnalysis[]> {
-  // Step 1: 获取基金池
-  const funds = getMockFunds();
-  console.log(`[recommend] Step 1: 基金池 ${funds.length} 只`);
+const HOT_KEYWORDS = [
+  '科技', '创新', '成长', '信息', '电子', '智造', '高端',
+  '新能源', '医药', '医疗', '健康', '生物',
+  'AI', '机器人', '半导体', '芯片', '先进', '制造',
+  '数字经济', '人工智能', '高端装备', '新材料',
+  '智能', '互联', '5G', '云计算', '大数据', '软件',
+  '军工', '航天', '低碳', '绿色', '环保',
+  '消费', '升级', '改革', '红利',
+];
 
-  // Step 2: 获取净值（优先真实 API，降级 mock）
-  const navMap = new Map<string, NAVEntry[]>();
-  for (const fund of funds) {
-    let navData = getMockNAV(fund.code);
-    try {
-      const detail = await fetchFundDetail(fund.code);
-      if (detail && detail.navHistory.length > 0) {
-        navData = detail.navHistory;
-      }
-    } catch {
-      // 降级
-    }
-    navMap.set(fund.code, navData);
+function isHotSector(name: string): boolean {
+  return HOT_KEYWORDS.some(kw => name.includes(kw));
+}
+
+// ============================================================
+// 主管道
+// ============================================================
+
+async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalScanned: number }> {
+  // Step 1: 从天天基金获取全量基金列表（降级为 mock）
+  console.log('[recommend] Step 1: 获取全量基金列表...');
+  const allFunds = await fetchAllFunds();
+  console.log(`[recommend] 获取到 ${allFunds.length} 只基金`);
+
+  // Step 2: 筛选 — 仅混合型 + 热门赛道关键词
+  const mixedFunds = allFunds.filter(f => {
+    const type = (f.type || '').toLowerCase();
+    // 包含"混合"
+    if (!type.includes('混合')) return false;
+    // 且名称含热门赛道关键词
+    return isHotSector(f.name);
+  });
+
+  console.log(`[recommend] Step 2: 混合型+热门赛道 → ${mixedFunds.length} 只`);
+
+  // 回退：如果筛选结果太少，用 mock 基金池补充
+  let candidates: FundInfo[];
+  let totalScanned: number;
+  if (mixedFunds.length < 10) {
+    console.log('[recommend] 真实基金不足，补充 mock 基金池');
+    const mocks = getMockFunds().filter(f => f.type.includes('混合'));
+    candidates = [...mixedFunds, ...mocks];
+    totalScanned = candidates.length;
+  } else {
+    candidates = mixedFunds;
+    totalScanned = mixedFunds.length;
   }
-  console.log(`[recommend] Step 2: 净值获取完成 ${navMap.size} 只`);
 
-  // Step 3: 短期动量评分（替代六维评分）
-  const scoreMap = scoreShortTerm(funds, navMap);
-  console.log(`[recommend] Step 3: 短期动量评分完成 ${scoreMap.size} 只`);
+  // 若候选过多，取前 60 只（按规模适中优先：5-30 亿最优）
+  if (candidates.length > 60) {
+    candidates.sort((a, b) => {
+      const scoreA = scaleScore(a.scale);
+      const scoreB = scaleScore(b.scale);
+      return scoreB - scoreA;
+    });
+    candidates = candidates.slice(0, 60);
+  }
 
-  // Step 4: 排序取前 10
+  console.log(`[recommend] 候选基金池: ${candidates.length} 只`);
+
+  // Step 3: 批量获取净值（并发控制）
+  const navMap = new Map<string, NAVEntry[]>();
+  const batchSize = 8;
+  for (let i = 0; i < candidates.length; i += batchSize) {
+    const batch = candidates.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (f) => {
+        try {
+          const detail = await fetchFundDetail(f.code);
+          if (detail && detail.navHistory.length > 0) {
+            return { code: f.code, nav: detail.navHistory, name: detail.name };
+          }
+        } catch { /* fall through */ }
+        return { code: f.code, nav: getMockNAV(f.code), name: f.name };
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        // Update fund name from real API if available
+        const existing = candidates.find(c => c.code === r.value.code);
+        if (existing && r.value.name) existing.name = r.value.name;
+        navMap.set(r.value.code, r.value.nav);
+      }
+    }
+  }
+  console.log(`[recommend] Step 3: 净值获取完成 ${navMap.size} 只`);
+
+  // Step 4: 短期动量评分
+  const scoreMap = scoreShortTerm(candidates, navMap);
+  console.log(`[recommend] Step 4: 评分完成 ${scoreMap.size} 只`);
+
+  // Step 5: 排序，过滤 ≥50 分，取前 10
   const ranked = Array.from(scoreMap.entries())
+    .filter(([, score]) => score.total >= 50)
     .sort((a, b) => b[1].total - a[1].total)
     .slice(0, 10);
 
-  const fundMap = new Map(funds.map((f) => [f.code, f]));
+  const fundMap = new Map(candidates.map((f) => [f.code, f]));
   const results: FundAnalysis[] = ranked.map(([code, score], index) => {
     const fund = fundMap.get(code)!;
     const navData = navMap.get(code)!;
-    return buildFundAnalysis(fund, navData, score, funds.length, index + 1);
+    return buildFundAnalysis(fund, navData, score, totalScanned, index + 1);
   });
 
-  return results;
+  return { recommendations: results, totalScanned };
+}
+
+/** 规模适中得分：5-30 亿最优 → 高分 */
+function scaleScore(scale: number): number {
+  if (scale <= 0) return 50;
+  if (scale >= 5 && scale <= 30) return 100;
+  if (scale < 5) return 20 + scale * 16;
+  if (scale <= 100) return 100 - (scale - 30) * 0.7;
+  return Math.max(0, 51 - (scale - 100) * 0.3);
 }
 
 // ============================================================
@@ -111,12 +188,25 @@ function scoreShortTerm(
 
   for (const fund of funds) {
     const nav = navMap.get(fund.code) || [];
+    if (nav.length < 2) continue;
     const ret5d = calcReturnFrom(nav, 5);
     const ret15d = calcReturnFrom(nav, 15);
     const ret30d = calcReturnFrom(nav, 30);
     const sharpe = calcShortSharpe(nav);
     const volatility = calcVolatility(nav);
     allMetrics.push({ code: fund.code, ret5d, ret15d, ret30d, sharpe, volatility });
+  }
+
+  if (allMetrics.length < 2) {
+    // 候选太少，直接返回
+    const result = new Map<string, FundScore>();
+    for (const m of allMetrics) {
+      result.set(m.code, {
+        momentum: 50, riskControl: 10, riskAdjusted: 5,
+        manager: 7, scale: 7, sectorMatch: 5, total: 60,
+      });
+    }
+    return result;
   }
 
   // 交叉归一化
@@ -135,12 +225,11 @@ function scoreShortTerm(
   const result = new Map<string, FundScore>();
 
   for (const m of allMetrics) {
-    // 各维度归一化到 0-100 再乘权重
     const s5 = norm(m.ret5d, r5Min, r5Max) * 35;
     const s15 = norm(m.ret15d, r15Min, r15Max) * 35;
     const s30 = norm(m.ret30d, r30Min, r30Max) * 15;
     const sSh = norm(m.sharpe, shMin, shMax) * 10;
-    const sVo = (1 - norm(m.volatility, voMin, voMax)) * 5; // 波动率越低越好
+    const sVo = (1 - norm(m.volatility, voMin, voMax)) * 5;
 
     let total = Math.round(s5 + s15 + s30 + sSh + sVo);
     total = Math.max(0, Math.min(100, total));
@@ -149,7 +238,7 @@ function scoreShortTerm(
       momentum: Math.round(s5 + s15 + s30),
       riskControl: Math.round(sVo),
       riskAdjusted: Math.round(sSh),
-      manager: 7,  // 短期不看重经理
+      manager: 7,
       scale: 7,
       sectorMatch: 5,
       total,
@@ -174,7 +263,7 @@ function calcReturnFrom(navData: NAVEntry[], days: number): number {
   return ((endNav - startNav) / startNav) * 100;
 }
 
-/** 简化夏普比率（基于日收益率） */
+/** 简化夏普比率 */
 function calcShortSharpe(navData: NAVEntry[]): number {
   const returns: number[] = [];
   for (let i = 1; i < navData.length; i++) {
@@ -207,11 +296,10 @@ function buildFundAnalysis(
   fund: FundInfo,
   navData: NAVEntry[],
   score: FundScore,
-  totalFunds: number,
+  totalScanned: number,
   rank: number,
 ): FundAnalysis {
   const signal = computeSignal(score.total);
-  const grade = getGrade(score.total);
   const timing = computeTiming(navData);
 
   return {
@@ -219,11 +307,11 @@ function buildFundAnalysis(
     score,
     signal,
     investAdvice: null,
-    analysis: generateShortTermText(fund, score, grade, rank, timing, navData),
+    analysis: generateShortTermText(fund, score, rank, timing, navData),
     riskMetrics: computeRiskMetrics(navData),
     holdings: [],
-    sectorTags: deriveSectorTags(fund.type),
-    peerComparison: computePeerComparison(rank, totalFunds),
+    sectorTags: deriveSectorTags(fund.name, fund.type),
+    peerComparison: computePeerComparison(rank, totalScanned),
     currentNav: navData.length > 0 ? navData[navData.length - 1].nav : undefined,
     navDate: navData.length > 0 ? navData[navData.length - 1].date : undefined,
     ...timing,
@@ -243,8 +331,6 @@ interface Timing {
 
 function computeTiming(navData: NAVEntry[]): Timing {
   const today = new Date();
-
-  // 买入日期：今天
   const buyDate = formatLocalDate(today);
 
   // 清仓日期：+14 个自然日（≈10 个交易日）
@@ -258,7 +344,7 @@ function computeTiming(navData: NAVEntry[]): Timing {
 
   // 目标收益率：基于近 15 日收益折半（保守估计）
   const ret15d = calcReturnFrom(navData, 15);
-  const targetReturn = Math.round(Math.max(2, ret15d * 0.5) * 100) / 100;
+  const targetReturn = Math.round(Math.max(2, Math.abs(ret15d) * 0.5) * 100) / 100;
 
   return { buyDate, sellDate, stopLoss, targetReturn };
 }
@@ -281,10 +367,10 @@ function computeSignal(totalScore: number): SignalResult {
   if (totalScore >= 65) {
     return { signal: 'buy', score: totalScore, reason: '短期趋势良好，适合入场', suggestedPosition: '10%-20%' };
   }
-  if (totalScore >= 50) {
-    return { signal: 'hold', score: totalScore, reason: '短期动能一般，可小仓试探', suggestedPosition: '5%-10%' };
+  if (totalScore >= 55) {
+    return { signal: 'hold', score: totalScore, reason: '短期动能可接受，小仓试探', suggestedPosition: '5%-10%' };
   }
-  return { signal: 'reduce', score: totalScore, reason: '短期动能不足，暂不建议介入', suggestedPosition: '0%-5%' };
+  return { signal: 'hold', score: totalScore, reason: '短期动能一般，控制仓位', suggestedPosition: '3%-5%' };
 }
 
 // ============================================================
@@ -295,14 +381,10 @@ function computeRiskMetrics(navData: NAVEntry[]): RiskMetrics {
   if (navData.length < 2) {
     return { maxDrawdown: 0, volatility: 0, sharpe: 0, sortino: 0, calmar: 0, infoRatio: 0, beta: 0, alpha: 0 };
   }
-  const returns = navData.slice(1).map(e => e.dailyReturn);
-  const maxDD = calcMaxDrawdown(navData);
-  const vol = calcVolatility(navData);
-  const sh = calcShortSharpe(navData);
   return {
-    maxDrawdown: round2(maxDD),
-    volatility: round2(vol),
-    sharpe: round2(sh),
+    maxDrawdown: round2(calcMaxDrawdown(navData)),
+    volatility: round2(calcVolatility(navData)),
+    sharpe: round2(calcShortSharpe(navData)),
     sortino: 0, calmar: 0, infoRatio: 0, beta: 0, alpha: 0,
   };
 }
@@ -329,7 +411,6 @@ function round2(n: number): number {
 function generateShortTermText(
   fund: FundInfo,
   score: FundScore,
-  grade: { label: string; text: string },
   rank: number,
   timing: Timing,
   navData: NAVEntry[],
@@ -340,21 +421,18 @@ function generateShortTermText(
   const currentNav = navData.length > 0 ? navData[navData.length - 1].nav.toFixed(4) : '--';
 
   const parts = [
-    `${fund.name}（${fund.code}）短期动量评分${score.total}/100，排名第${rank}，评级"${grade.text}"。`,
+    `${fund.name}（${fund.code}）短期动量评分${score.total}/100，排名第${rank}，混合型基金。`,
     `当前净值 ${currentNav}，近5日收益 ${ret5d >= 0 ? '+' : ''}${ret5d.toFixed(2)}%，近15日收益 ${ret15d >= 0 ? '+' : ''}${ret15d.toFixed(2)}%，近30日收益 ${ret30d >= 0 ? '+' : ''}${ret30d.toFixed(2)}%。`,
     `建议买入日：${timing.buyDate}，目标清仓日：${timing.sellDate}（持有约10个交易日）。`,
     `止损价：${timing.stopLoss.toFixed(4)}（-5%），目标收益率：${timing.targetReturn >= 0 ? '+' : ''}${timing.targetReturn.toFixed(2)}%。`,
-    `基金类型${fund.type}，由${fund.company}管理。`,
   ];
 
   if (score.total >= 80) {
     parts.push('短期爆发力极强，趋势明确，适合短线积极介入。');
   } else if (score.total >= 65) {
     parts.push('短期趋势向好，可适度参与，注意控制仓位。');
-  } else if (score.total >= 50) {
-    parts.push('短期动能尚可，建议小仓位试探，严格止盈止损。');
   } else {
-    parts.push('短期动能偏弱，风险收益比不佳，建议观望。');
+    parts.push('短期动能尚可，建议小仓位试探，严格止盈止损。');
   }
 
   return parts.join('');
@@ -364,15 +442,17 @@ function generateShortTermText(
 // 行业标签
 // ============================================================
 
-function deriveSectorTags(fundType: string): string[] {
-  const lower = fundType.toLowerCase();
-  if (lower.includes('股票')) return ['权益类', '股票型'];
-  if (lower.includes('混合')) return ['权益类', '混合型'];
-  if (lower.includes('指数')) return ['被动型', '指数型'];
-  if (lower.includes('qdii')) return ['QDII', '海外'];
-  if (lower.includes('债券')) return ['固收类', '债券型'];
-  if (lower.includes('货币')) return ['现金类', '货币型'];
-  return [fundType];
+function deriveSectorTags(name: string, fundType: string): string[] {
+  const tags: string[] = [];
+  const combined = `${name}${fundType}`;
+  if (combined.includes('科技') || combined.includes('信息') || combined.includes('电子')) tags.push('科技-TMT');
+  if (combined.includes('新能源') || combined.includes('低碳') || combined.includes('绿色')) tags.push('新能源');
+  if (combined.includes('医药') || combined.includes('医疗') || combined.includes('健康') || combined.includes('生物')) tags.push('医药');
+  if (combined.includes('智造') || combined.includes('高端') || combined.includes('机器人') || combined.includes('制造')) tags.push('高端制造');
+  if (combined.includes('军工') || combined.includes('航天')) tags.push('军工');
+  if (combined.includes('消费') || combined.includes('升级')) tags.push('消费');
+  if (tags.length === 0) tags.push('混合型');
+  return tags;
 }
 
 // ============================================================
@@ -399,22 +479,9 @@ function readCachedRecommendations(date: string): FundAnalysis[] {
   }>;
   if (rows.length === 0) return [];
 
-  const allFunds = getMockFunds();
-  const fundMap = new Map(allFunds.map(f => [f.code, f]));
-  const navMap = new Map<string, NAVEntry[]>();
-  for (const f of allFunds) navMap.set(f.code, getMockNAV(f.code));
-  const scoreMap = scoreAllFunds(allFunds, navMap);
-
-  const results: FundAnalysis[] = [];
-  for (const row of rows) {
-    const fund = fundMap.get(row.fund_code);
-    if (!fund) continue;
-    const score = scoreMap.get(row.fund_code);
-    if (!score) continue;
-    const navData = navMap.get(row.fund_code)!;
-    results.push(buildFundAnalysis(fund, navData, score, allFunds.length, row.rank));
-  }
-  return results;
+  // 重新实时评分
+  // For cached reads, use mock data since we can't replay the full pipeline
+  return []; // Always refresh for now
 }
 
 function storeRecommendations(date: string, recommendations: FundAnalysis[]): void {
@@ -430,7 +497,7 @@ function storeRecommendations(date: string, recommendations: FundAnalysis[]): vo
   `);
 
   const upsertFunds = db.transaction((recs: FundAnalysis[]) => {
-    for (const r of recs) upsertFund.run(r.code, r.name, r.type, r.manager, r.scale, r.inception, r.company);
+    for (const r of recs) upsertFund.run(r.code, r.name, r.type, r.manager || '', r.scale || 0, r.inception || '', r.company || '');
   });
   upsertFunds(recommendations);
 
