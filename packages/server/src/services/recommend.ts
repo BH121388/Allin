@@ -93,21 +93,30 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
     totalScanned = mixedFunds.length;
   }
 
-  // 若候选过多，取前 60 只（按规模适中优先：5-30 亿最优）
-  if (candidates.length > 60) {
-    candidates.sort((a, b) => {
-      const scoreA = scaleScore(a.scale);
-      const scoreB = scaleScore(b.scale);
-      return scoreB - scoreA;
-    });
-    candidates = candidates.slice(0, 60);
+  // 用 mock 补全真实基金的缺失字段（manager/tenure/scale 等），与搜索/持仓一致
+  const mockMap = new Map(getMockFunds().map(f => [f.code, f]));
+  for (const c of candidates) {
+    const mock = mockMap.get(c.code);
+    if (mock) Object.assign(c, mock);
+  }
+
+  // 候选池：mock 匹配优先（数据更完整），再补随机，取 100 只
+  if (candidates.length > 100) {
+    const withMock = candidates.filter(c => mockMap.has(c.code));
+    const withoutMock = candidates.filter(c => !mockMap.has(c.code));
+    // 随机打散无 mock 的，避免 API 返回顺序偏差
+    for (let i = withoutMock.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [withoutMock[i], withoutMock[j]] = [withoutMock[j], withoutMock[i]];
+    }
+    candidates = [...withMock, ...withoutMock].slice(0, 100);
   }
 
   console.log(`[recommend] 候选基金池: ${candidates.length} 只`);
 
   // Step 3: 批量获取净值（并发控制）
   const navMap = new Map<string, NAVEntry[]>();
-  const batchSize = 8;
+  const batchSize = 10;
   for (let i = 0; i < candidates.length; i += batchSize) {
     const batch = candidates.slice(i, i + batchSize);
     const results = await Promise.allSettled(
@@ -150,15 +159,6 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   });
 
   return { recommendations: results, totalScanned };
-}
-
-/** 规模适中得分：5-30 亿最优 → 高分 */
-function scaleScore(scale: number): number {
-  if (scale <= 0) return 50;
-  if (scale >= 5 && scale <= 30) return 100;
-  if (scale < 5) return 20 + scale * 16;
-  if (scale <= 100) return 100 - (scale - 30) * 0.7;
-  return Math.max(0, 51 - (scale - 100) * 0.3);
 }
 
 // ============================================================
