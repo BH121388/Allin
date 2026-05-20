@@ -19,6 +19,7 @@ export interface PortfolioHolding {
   todayPnl?: number;
   lastNAV?: number;
   navDate?: string;
+  navSource?: string;
   sellSuggestion?: string;
 }
 

@@ -39,6 +39,7 @@ interface PortfolioHolding {
   todayPnl?: number;
   lastNAV?: number;
   navDate?: string;
+  navSource?: string;
   sellSuggestion?: string;
 }
 
@@ -428,14 +429,43 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const navData = navDataByCode.get(row.code) || [];
-      const lastNAV = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
+      const lastEntry = navData.length > 0 ? navData[navData.length - 1] : null;
+      const lastNAV = lastEntry?.nav ?? row.cost_nav;
+      const lastDate = lastEntry?.date ?? '';
 
-      // 盘中估算净值（优先），否则用昨收净值
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const hasOfficialToday = lastDate === todayStr;
+
       const intra = intradayResults[i];
       const estimated = (intra.status === 'fulfilled' && intra.value) ? intra.value : null;
-      const currentNav = estimated?.estimatedNav ?? lastNAV;
-      const todayChange = estimated?.weightedChange ?? 0;
-      const navDate = estimated?.navDate ?? (navData.length > 0 ? navData[navData.length - 1].date : '');
+
+      // 净值逻辑：官方今日 > 盘中估算 > 昨收
+      let currentNav: number;
+      let todayChange: number;
+      let navDate: string;
+      let navSource: string;
+
+      if (hasOfficialToday && lastEntry) {
+        // 官方已公布今日净值
+        const prevEntry = navData.length >= 2 ? navData[navData.length - 2] : null;
+        const prevNAV = prevEntry?.nav ?? lastNAV;
+        currentNav = lastNAV;
+        todayChange = prevNAV > 0 ? Math.round(((lastNAV - prevNAV) / prevNAV) * 10000) / 100 : 0;
+        navDate = lastDate;
+        navSource = '官方净值';
+      } else if (estimated && estimated.weightedChange !== 0) {
+        // 盘中估算
+        currentNav = estimated.estimatedNav;
+        todayChange = estimated.weightedChange;
+        navDate = estimated.navDate;
+        navSource = '盘中估算';
+      } else {
+        // 无估算数据
+        currentNav = lastNAV;
+        todayChange = 0;
+        navDate = lastDate;
+        navSource = '昨收净值';
+      }
 
       const currentValue = row.shares * currentNav;
       const pnl = currentValue - row.amount;
@@ -475,6 +505,7 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
         todayPnl: Math.round(todayPnl * 100) / 100,
         lastNAV: Math.round(lastNAV * 10000) / 10000,
         navDate,
+        navSource,
         sellSuggestion,
       });
 

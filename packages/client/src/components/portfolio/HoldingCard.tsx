@@ -71,6 +71,11 @@ export default function HoldingCard({ holding, onRemove }: HoldingCardProps) {
             </span>
             <span className="text-muted-foreground">
               净值: <span className="text-slate-700 font-medium">{holding.currentNav}</span>
+              {holding.navSource && (
+                <span className={cn('ml-1 text-xs px-1 py-0.5 rounded', holding.navSource === '官方净值' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600')}>
+                  {holding.navSource}
+                </span>
+              )}
               {holding.todayChange != null && holding.todayChange !== 0 && (
                 <span className={cn('ml-1 text-xs', holding.todayChange >= 0 ? 'text-emerald-600' : 'text-red-500')}>
                   {holding.todayChange >= 0 ? '+' : ''}{holding.todayChange}%
