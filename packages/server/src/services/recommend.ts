@@ -145,8 +145,13 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   const scoreMap = scoreAllFundsUnified(candidates, navMap);
   console.log(`[recommend] Step 4: 统一评分完成 ${scoreMap.size} 只`);
 
-  // Step 5: 排序，过滤 ≥50 分，取前 10
+  // Step 5: 排除已持有，排序，过滤 ≥50 分，取前 10
+  const db = getDb();
+  const heldCodes = new Set(
+    (db.prepare('SELECT code FROM portfolio').all() as Array<{ code: string }>).map(r => r.code),
+  );
   const ranked = Array.from(scoreMap.entries())
+    .filter(([code]) => !heldCodes.has(code))
     .filter(([, score]) => score.total >= 50)
     .sort((a, b) => b[1].total - a[1].total)
     .slice(0, 10);
