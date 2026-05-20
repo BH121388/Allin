@@ -8,6 +8,7 @@
 
 import type { FundInfo, FundAnalysis, FundScore, SignalResult, RiskMetrics, PeerComparison } from '@allin/shared';
 import { getMockFunds, getMockNAV, fetchFundDetail, fetchAllFunds, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
+import { scoreAllFundsUnified, getGrade } from './scoring.js';
 import { getDb } from '../db/index.js';
 
 // ============================================================
@@ -133,9 +134,9 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   }
   console.log(`[recommend] Step 3: 净值获取完成 ${navMap.size} 只`);
 
-  // Step 4: 短期动量评分
-  const scoreMap = scoreShortTerm(candidates, navMap);
-  console.log(`[recommend] Step 4: 评分完成 ${scoreMap.size} 只`);
+  // Step 4: 统一评分（收益+风险平衡）
+  const scoreMap = scoreAllFundsUnified(candidates, navMap);
+  console.log(`[recommend] Step 4: 统一评分完成 ${scoreMap.size} 只`);
 
   // Step 5: 排序，过滤 ≥50 分，取前 10
   const ranked = Array.from(scoreMap.entries())
@@ -160,132 +161,6 @@ function scaleScore(scale: number): number {
   if (scale < 5) return 20 + scale * 16;
   if (scale <= 100) return 100 - (scale - 30) * 0.7;
   return Math.max(0, 51 - (scale - 100) * 0.3);
-}
-
-// ============================================================
-// 短期动量评分（满分 100）
-//
-// 权重分配：
-//   - 5 日收益   35%  （短期爆发力）
-//   - 15 日收益  35%  （半月趋势）
-//   - 30 日收益  15%  （月度确认）
-//   - 夏普比率   10%  （风险调整）
-//   - 波动率惩罚  5%  （波动越小越好）
-// ============================================================
-
-function scoreShortTerm(
-  funds: FundInfo[],
-  navMap: Map<string, NAVEntry[]>,
-): Map<string, FundScore> {
-  const allMetrics: Array<{
-    code: string;
-    ret5d: number;
-    ret15d: number;
-    ret30d: number;
-    sharpe: number;
-    volatility: number;
-  }> = [];
-
-  for (const fund of funds) {
-    const nav = navMap.get(fund.code) || [];
-    if (nav.length < 2) continue;
-    const ret5d = calcReturnFrom(nav, 5);
-    const ret15d = calcReturnFrom(nav, 15);
-    const ret30d = calcReturnFrom(nav, 30);
-    const sharpe = calcShortSharpe(nav);
-    const volatility = calcVolatility(nav);
-    allMetrics.push({ code: fund.code, ret5d, ret15d, ret30d, sharpe, volatility });
-  }
-
-  if (allMetrics.length < 2) {
-    // 候选太少，直接返回
-    const result = new Map<string, FundScore>();
-    for (const m of allMetrics) {
-      result.set(m.code, {
-        momentum: 50, riskControl: 10, riskAdjusted: 5,
-        manager: 7, scale: 7, sectorMatch: 5, total: 60,
-      });
-    }
-    return result;
-  }
-
-  // 交叉归一化
-  const ret5dVals = allMetrics.map(m => m.ret5d);
-  const ret15dVals = allMetrics.map(m => m.ret15d);
-  const ret30dVals = allMetrics.map(m => m.ret30d);
-  const sharpeVals = allMetrics.map(m => m.sharpe);
-  const volVals = allMetrics.map(m => m.volatility);
-
-  const r5Min = Math.min(...ret5dVals), r5Max = Math.max(...ret5dVals);
-  const r15Min = Math.min(...ret15dVals), r15Max = Math.max(...ret15dVals);
-  const r30Min = Math.min(...ret30dVals), r30Max = Math.max(...ret30dVals);
-  const shMin = Math.min(...sharpeVals), shMax = Math.max(...sharpeVals);
-  const voMin = Math.min(...volVals), voMax = Math.max(...volVals);
-
-  const result = new Map<string, FundScore>();
-
-  for (const m of allMetrics) {
-    const s5 = norm(m.ret5d, r5Min, r5Max) * 35;
-    const s15 = norm(m.ret15d, r15Min, r15Max) * 35;
-    const s30 = norm(m.ret30d, r30Min, r30Max) * 15;
-    const sSh = norm(m.sharpe, shMin, shMax) * 10;
-    const sVo = (1 - norm(m.volatility, voMin, voMax)) * 5;
-
-    let total = Math.round(s5 + s15 + s30 + sSh + sVo);
-    total = Math.max(0, Math.min(100, total));
-
-    result.set(m.code, {
-      momentum: Math.round(s5 + s15 + s30),
-      riskControl: Math.round(sVo),
-      riskAdjusted: Math.round(sSh),
-      manager: 7,
-      scale: 7,
-      sectorMatch: 5,
-      total,
-    });
-  }
-
-  return result;
-}
-
-function norm(value: number, min: number, max: number): number {
-  if (max <= min) return 0.5;
-  return Math.max(0, Math.min(1, (value - min) / (max - min)));
-}
-
-/** 计算指定天数的区间收益率 (%) */
-function calcReturnFrom(navData: NAVEntry[], days: number): number {
-  if (navData.length < 2) return 0;
-  const targetIdx = Math.max(0, navData.length - 1 - Math.min(days, navData.length - 1));
-  const startNav = navData[targetIdx].nav;
-  const endNav = navData[navData.length - 1].nav;
-  if (startNav <= 0) return 0;
-  return ((endNav - startNav) / startNav) * 100;
-}
-
-/** 简化夏普比率 */
-function calcShortSharpe(navData: NAVEntry[]): number {
-  const returns: number[] = [];
-  for (let i = 1; i < navData.length; i++) {
-    returns.push(navData[i].dailyReturn || 0);
-  }
-  if (returns.length < 2) return 0;
-  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
-  const std = Math.sqrt(variance);
-  return std > 0 ? (mean / std) * Math.sqrt(252) : 0;
-}
-
-/** 年化波动率 (%) */
-function calcVolatility(navData: NAVEntry[]): number {
-  const returns: number[] = [];
-  for (let i = 1; i < navData.length; i++) {
-    returns.push(navData[i].dailyReturn || 0);
-  }
-  if (returns.length < 2) return 0;
-  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
-  return Math.sqrt(variance) * Math.sqrt(252);
 }
 
 // ============================================================
@@ -398,6 +273,34 @@ function calcMaxDrawdown(navData: NAVEntry[]): number {
     if (dd > maxDD) maxDD = dd;
   }
   return maxDD;
+}
+
+function calcReturnFrom(navData: NAVEntry[], days: number): number {
+  if (navData.length < 2) return 0;
+  const targetIdx = Math.max(0, navData.length - 1 - Math.min(days, navData.length - 1));
+  const startNav = navData[targetIdx].nav;
+  const endNav = navData[navData.length - 1].nav;
+  if (startNav <= 0) return 0;
+  return ((endNav - startNav) / startNav) * 100;
+}
+
+function calcShortSharpe(navData: NAVEntry[]): number {
+  const returns: number[] = [];
+  for (let i = 1; i < navData.length; i++) returns.push(navData[i].dailyReturn || 0);
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+  const std = Math.sqrt(variance);
+  return std > 0 ? (mean / std) * Math.sqrt(252) : 0;
+}
+
+function calcVolatility(navData: NAVEntry[]): number {
+  const returns: number[] = [];
+  for (let i = 1; i < navData.length; i++) returns.push(navData[i].dailyReturn || 0);
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance) * Math.sqrt(252);
 }
 
 function round2(n: number): number {

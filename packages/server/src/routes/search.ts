@@ -8,7 +8,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
 import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, type NAVEntry } from '../adapters/eastmoney.js';
-import { scoreFund, scoreAllFunds, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
+import { scoreFund, scoreAllFunds, scoreAllFundsUnified, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
 import { calculateInvestMultiplier } from '../services/invest.js';
@@ -85,7 +85,7 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
     for (const mf of mockFunds) {
       if (mf.code !== code) navMap.set(mf.code, getMockNAV(mf.code));
     }
-    const allScores = scoreAllFunds(mockFunds, navMap);
+    const allScores = scoreAllFundsUnified(mockFunds, navMap);
     const score = allScores.get(code) || scoreFund(fund, navData);
 
     // 4. 交易信号

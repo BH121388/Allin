@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
 import { getMockNAV, getMockFunds, fetchFundDetail } from '../adapters/eastmoney.js';
-import { scoreFund, scoreAllFunds } from '../services/scoring.js';
+import { scoreFund, scoreAllFunds, scoreAllFundsUnified } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
 import type { TakeProfitRule, TakeProfitAction } from '../services/takeProfit.js';
@@ -378,9 +378,8 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     let totalValue = 0;
     let totalCost = 0;
 
-    // 收集所有持仓的 FundInfo 和 NAV，用于批量交叉归一化评分
+    // 收集所有持仓的 FundInfo 和 NAV，用于统一评分
     const fundInfos: FundInfo[] = [];
-    const navMap = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
     const navDataByCode = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
 
     for (const row of rows) {
@@ -393,7 +392,6 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
       } catch {
         // fall back to mock
       }
-      navDataByCode.set(row.code, navData);
       let fundInfo: FundInfo;
       const existing = fundMap.get(row.code);
       if (existing) {
@@ -405,11 +403,11 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
         };
       }
       fundInfos.push(fundInfo);
-      navMap.set(row.code, navData);
+      navDataByCode.set(row.code, navData);
     }
 
     // 批量评分确保与推荐一致的交叉归一化
-    const scores = scoreAllFunds(fundInfos, navMap);
+    const scores = scoreAllFundsUnified(fundInfos, navDataByCode);
 
     for (const row of rows) {
       const navData = navDataByCode.get(row.code) || [];

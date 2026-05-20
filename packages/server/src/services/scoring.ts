@@ -550,7 +550,182 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 // ============================================================
-// 公共导出函数
+// 统一评分 — 收益+风险平衡（所有页面共用）
+//
+// 权重：收益 50%（5d 20% + 15d 20% + 30d 10%）
+//       风险 50%（最大回撤 18% + 波动率 17% + 夏普 15%）
+// 固定参考值归一化 — 同一基金在任何上下文得分完全一致
+// ============================================================
+
+// 固定参考值 — 保证同一基金在任何上下文得分一致
+const UNIFIED_REF = {
+  ret5d:    { min: -8,  max: 18 },   // 5日收益
+  ret15d:   { min: -15, max: 35 },   // 15日收益
+  ret30d:   { min: -20, max: 50 },   // 30日收益
+  sharpe:   { min: -1,  max: 3 },    // 夏普比率
+  drawdown: { min: 3,   max: 35 },   // 最大回撤（反向）
+  volatility:{ min: 8,  max: 35 },   // 年化波动率（反向）
+};
+
+export function scoreAllFundsUnified(
+  funds: FundInfo[],
+  navMap: Map<string, NAVEntry[]>,
+): Map<string, FundScore> {
+  const fundMap = new Map(funds.map(f => [f.code, f]));
+  const result = new Map<string, FundScore>();
+
+  for (const fund of funds) {
+    const nav = navMap.get(fund.code) || [];
+    if (nav.length < 2) {
+      result.set(fund.code, {
+        momentum: 0, riskControl: 5, riskAdjusted: 3,
+        manager: scoreManagerForFund(fund),
+        scale: scoreScaleForFund(fund),
+        sectorMatch: scoreSectorForFund(fund),
+        total: 0,
+      });
+      continue;
+    }
+
+    const ret5d = calcReturnFrom(nav, 5);
+    const ret15d = calcReturnFrom(nav, 15);
+    const ret30d = calcReturnFrom(nav, 30);
+    const sharpe = calcSharpeFromNAV(nav);
+    const maxDrawdown = calcMaxDrawdownFromNAV(nav);
+    const volatility = calcVolatilityFromNAV(nav);
+
+    const R = UNIFIED_REF;
+    // 收益 50%（固定参考值归一化）
+    const s5 = normFixed(ret5d, R.ret5d.min, R.ret5d.max) * 20;
+    const s15 = normFixed(ret15d, R.ret15d.min, R.ret15d.max) * 20;
+    const s30 = normFixed(ret30d, R.ret30d.min, R.ret30d.max) * 10;
+
+    // 风险 50%
+    const sDD = (1 - normFixed(maxDrawdown, R.drawdown.min, R.drawdown.max)) * 18;
+    const sVO = (1 - normFixed(volatility, R.volatility.min, R.volatility.max)) * 17;
+    const sSH = normFixed(sharpe, R.sharpe.min, R.sharpe.max) * 15;
+
+    const momentum = Math.round(s5 + s15 + s30);
+    const riskControl = Math.round(sDD + sVO);
+    const riskAdjusted = Math.round(sSH);
+
+    const manager = scoreManagerForFund(fund);
+    const scale = scoreScaleForFund(fund);
+    const sectorMatch = scoreSectorForFund(fund);
+
+    const total = clamp(
+      momentum + riskControl + riskAdjusted + manager + scale + sectorMatch,
+      0, 100,
+    );
+
+    result.set(fund.code, {
+      momentum: clamp(momentum, 0, 25),
+      riskControl: clamp(riskControl, 0, 20),
+      riskAdjusted: clamp(riskAdjusted, 0, 15),
+      manager: clamp(manager, 0, 15),
+      scale: clamp(scale, 0, 15),
+      sectorMatch: clamp(sectorMatch, 0, 10),
+      total,
+    });
+  }
+
+  return result;
+}
+
+/** 正向固定参考值归一化 */
+function normFixed(value: number, min: number, max: number): number {
+  if (max <= min) return 0.5;
+  return Math.max(0, Math.min(1, (value - min) / (max - min)));
+}
+
+/** 从 NAV 计算区间收益率 */
+function calcReturnFrom(navData: NAVEntry[], days: number): number {
+  if (navData.length < 2) return 0;
+  const targetIdx = Math.max(0, navData.length - 1 - Math.min(days, navData.length - 1));
+  const startNav = navData[targetIdx].nav;
+  const endNav = navData[navData.length - 1].nav;
+  if (startNav <= 0) return 0;
+  return ((endNav - startNav) / startNav) * 100;
+}
+
+function calcSharpeFromNAV(navData: NAVEntry[]): number {
+  const returns: number[] = [];
+  for (let i = 1; i < navData.length; i++) returns.push(navData[i].dailyReturn || 0);
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+  const std = Math.sqrt(variance);
+  return std > 0 ? (mean / std) * Math.sqrt(252) : 0;
+}
+
+function calcVolatilityFromNAV(navData: NAVEntry[]): number {
+  const returns: number[] = [];
+  for (let i = 1; i < navData.length; i++) returns.push(navData[i].dailyReturn || 0);
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance) * Math.sqrt(252);
+}
+
+function calcMaxDrawdownFromNAV(navData: NAVEntry[]): number {
+  let peak = navData[0]?.nav ?? 0;
+  let maxDD = 0;
+  for (const e of navData) {
+    if (e.nav > peak) peak = e.nav;
+    const dd = ((peak - e.nav) / peak) * 100;
+    if (dd > maxDD) maxDD = dd;
+  }
+  return maxDD;
+}
+
+// 简化的维度微调（不影响主分，仅做微调）
+function scoreManagerForFund(fund?: FundInfo): number {
+  if (!fund) return 7;
+  const ret = parseManagerReturnVal(fund.managerReturn);
+  const yrs = parseTenureYearsVal(fund.tenure);
+  let s = 0;
+  if (ret > 0) s += Math.min(7.5, (ret / 200) * 7.5);
+  if (yrs > 0) s += Math.min(7.5, yrs >= 3 ? 7.5 : (yrs / 3) * 7.5);
+  else s += 3;
+  return Math.round(s);
+}
+
+function scoreScaleForFund(fund?: FundInfo): number {
+  const scale = fund?.scale ?? 0;
+  if (scale === 0) return 6;
+  if (scale < 5) return Math.round((scale / 5) * 15);
+  if (scale <= 30) return 15;
+  if (scale <= 80) return Math.round(15 - ((scale - 30) / 50) * 3);
+  if (scale <= 150) return Math.round(12 - ((scale - 80) / 70) * 5);
+  if (scale <= 300) return Math.round(7 - ((scale - 150) / 150) * 5);
+  return 1;
+}
+
+function scoreSectorForFund(fund?: FundInfo): number {
+  if (!fund) return 5;
+  const base = SECTOR_BASE[fund.type] ?? 5;
+  const jitter = Math.abs(hashCode(fund.code + fund.type)) % 3 - 1;
+  return clamp(base + jitter, 0, 10);
+}
+
+function parseManagerReturnVal(raw: string): number {
+  if (!raw) return 0;
+  const cleaned = raw.replace(/[+%]/g, '');
+  const val = parseFloat(cleaned);
+  return Number.isNaN(val) ? 0 : val;
+}
+
+function parseTenureYearsVal(raw: string): number {
+  if (!raw) return 0;
+  const yearMatch = raw.match(/(\d+)年/);
+  const dayMatch = raw.match(/(\d+)天/);
+  const years = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+  const days = dayMatch ? parseInt(dayMatch[1], 10) : 0;
+  return years + days / 365;
+}
+
+// ============================================================
+// 旧版六维评分（保留兼容）
 // ============================================================
 
 /**
