@@ -100,13 +100,16 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
     if (mock) Object.assign(c, mock);
   }
 
-  // 候选池：mock 匹配优先（数据更完整），再补随机，取 100 只
+  // 候选池：mock 匹配优先 + 确定性打散（按日期种子，当天不变）
   if (candidates.length > 100) {
     const withMock = candidates.filter(c => mockMap.has(c.code));
     const withoutMock = candidates.filter(c => !mockMap.has(c.code));
-    // 随机打散无 mock 的，避免 API 返回顺序偏差
+    // 用今日日期作为种子，当天推荐固定
+    const today = new Date();
+    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    const rng = createSeededRNG(seed);
     for (let i = withoutMock.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rng() * (i + 1));
       [withoutMock[i], withoutMock[j]] = [withoutMock[j], withoutMock[i]];
     }
     candidates = [...withMock, ...withoutMock].slice(0, 100);
@@ -164,6 +167,17 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
   });
 
   return { recommendations: results, totalScanned };
+}
+
+/** 基于种子的确定性伪随机数生成器 (mulberry32) */
+function createSeededRNG(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // ============================================================
