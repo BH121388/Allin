@@ -55,26 +55,25 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
 
     if (detail && detail.stockCodes.length > 0) {
       // 使用真实持仓代码 + 股票名称映射
-      // 代码已由 fetchFundDetail 清洗，直接使用
       const rawHoldings = detail.stockCodes.slice(0, 10).map((sc) => {
-        const name = lookupStockName(sc);
+        const name = lookupStockName(sc) || sc; // 没名称时用代码
         return { stockCode: sc, stockName: name };
-      }).filter(h => h.stockName);
+      });
 
       // 等权分配（真实权重需从季报API获取）
-      const perWeight = rawHoldings.length > 0 ? Math.round((100 / rawHoldings.length) * 100) / 100 : 0;
+      const perWeight = Math.round((100 / rawHoldings.length) * 100) / 100;
       const realHoldings = rawHoldings.map(h => ({
         ...h,
         weight: perWeight,
-        changeToday: 0, // 实时行情需额外API
+        changeToday: 0,
       }));
 
       data = {
         fundCode: code,
         fundName: fund.name || detail.name,
-        holdings: realHoldings.length > 0 ? realHoldings : generateHoldings(fund).holdings,
+        holdings: realHoldings,
         weightedChange: 0,
-        sectorTags: realHoldings.length > 0 ? deriveSectorTagsSimple(realHoldings.map(h => h.stockName)) : [],
+        sectorTags: deriveSectorTagsSimple(realHoldings.map(h => h.stockName)),
         sectorBreakdown: [],
         style: '',
         dataDate: detail.dataDate,
@@ -105,27 +104,52 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
   }
 });
 
-// 简单的股票名→板块标签推导（基于关键词）
+// 股票名→板块标签推导（基于关键词匹配）
 function deriveSectorTagsSimple(stockNames: string[]): string[] {
   const tags = new Set<string>();
   const mapping: Record<string, string[]> = {
+    // 消费
     '茅台': ['消费'], '五粮液': ['消费'], '泸州': ['消费'], '伊利': ['消费'],
+    '美的': ['消费'], '格力': ['消费'], '洋河': ['消费'], '海天': ['消费'],
+    // 新能源
     '宁德': ['新能源'], '比亚迪': ['新能源', '制造'], '隆基': ['新能源'],
+    '阳光电源': ['新能源'], '通威': ['新能源'], '亿纬': ['新能源'],
+    '天合': ['新能源'], '晶澳': ['新能源'], '锦浪': ['新能源'],
+    '派能': ['新能源'], '固德威': ['新能源'], '禾迈': ['新能源'],
+    // 医药
     '迈瑞': ['医药'], '恒瑞': ['医药'], '爱尔': ['医药'], '药明': ['医药'],
+    '智飞': ['医药'], '长春高新': ['医药'], '泰格': ['医药'],
+    '百济': ['医药'], '君实': ['医药'], '信达': ['医药'],
+    '艾力斯': ['医药'], '康希诺': ['医药'], '荣昌': ['医药'],
+    // 金融
     '招商银行': ['金融'], '平安': ['金融'], '兴业': ['金融'],
+    '工商银行': ['金融'], '建设银行': ['金融'],
+    // 科技/TMT
     '海康': ['科技-TMT'], '科大': ['科技-TMT'], '立讯': ['科技-TMT'],
     '腾讯': ['科技-TMT'], '阿里': ['科技-TMT'], '美团': ['科技-TMT'],
     '金山': ['科技-TMT'], '中芯': ['科技-TMT'],
+    // AI/CPO/半导体
+    '新易盛': ['科技-TMT'], '中际': ['科技-TMT'], '天孚': ['科技-TMT'],
+    '源杰': ['科技-TMT'], '寒武纪': ['科技-TMT'], '海光': ['科技-TMT'],
+    '景嘉微': ['科技-TMT'], '北方华创': ['科技-TMT'],
+    '长电': ['科技-TMT'], '通富': ['科技-TMT'],
+    '绿的谐波': ['制造'], '埃斯顿': ['制造'], '拓斯达': ['制造'],
+    '机器人': ['制造'], '汇川': ['制造'],
+    // 低空
+    '中信海直': ['军工'], '万丰': ['军工'], '航天': ['军工'],
+    // 公用/能源
     '长江电力': ['公用事业'], '紫金': ['能源材料'],
-    '美的': ['消费'], '格力': ['消费'], '洋河': ['消费'],
     '三一': ['制造'], '潍柴': ['制造'],
     '万科': ['金融地产'], '保利': ['金融地产'],
+    '歌尔': ['科技-TMT'], '中兴': ['科技-TMT'],
   };
   for (const [keyword, ts] of Object.entries(mapping)) {
     if (stockNames.some(n => n.includes(keyword))) {
       ts.forEach(t => tags.add(t));
     }
   }
+  // 兜底：代码匹配不到时给默认标签
+  if (tags.size === 0 && stockNames.length > 0) tags.add('混合持仓');
   return Array.from(tags).slice(0, 5);
 }
 
