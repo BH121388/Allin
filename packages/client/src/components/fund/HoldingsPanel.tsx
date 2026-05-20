@@ -97,9 +97,15 @@ export default function HoldingsPanel({ code, fundName }: HoldingsPanelProps) {
     );
   }
 
-  // Empty state — should not happen with valid codes, but handle gracefully
+  // Empty state — 新基金暂未披露持仓
   if (!holdings || !holdings.holdings || holdings.holdings.length === 0) {
-    return null;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-6">
+        <p className="text-sm text-slate-400 text-center">
+          {holdings?.source || '暂无持仓数据'}
+        </p>
+      </div>
+    );
   }
 
   const top10 = holdings.holdings.slice(0, 10);

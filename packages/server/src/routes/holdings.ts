@@ -54,13 +54,12 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
     let data: HoldingsDetail;
 
     if (detail && detail.stockCodes.length > 0) {
-      // 使用真实持仓代码 + 股票名称映射
+      // 有真实持仓数据
       const rawHoldings = detail.stockCodes.slice(0, 10).map((sc) => {
-        const name = lookupStockName(sc) || sc; // 没名称时用代码
+        const name = lookupStockName(sc) || sc;
         return { stockCode: sc, stockName: name };
       });
 
-      // 等权分配（真实权重需从季报API获取）
       const perWeight = Math.round((100 / rawHoldings.length) * 100) / 100;
       const realHoldings = rawHoldings.map(h => ({
         ...h,
@@ -78,6 +77,19 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
         style: '',
         dataDate: detail.dataDate,
         source: '天天基金',
+      };
+    } else if (detail) {
+      // API 有数据但暂未披露持仓（新基金常见）
+      data = {
+        fundCode: code,
+        fundName: fund.name || detail.name,
+        holdings: [],
+        weightedChange: 0,
+        sectorTags: [],
+        sectorBreakdown: [],
+        style: '',
+        dataDate: detail.dataDate,
+        source: '暂无持仓披露',
       };
     } else {
       data = generateHoldings(fund);
