@@ -38,13 +38,28 @@ npm run dev          # 同时启动前后端
 - ✅ **板块识别升级** — 300+ 股票关键词 → 10 大板块标签自动匹配
 - ✅ **AddFundForm bug 修复** — 成本净值改用 navHistory 最后一条（官方净值），不再误用盘中估算
 
-## 接下来要做的事
+### A股股票模块（2026-05-21~22 完整版）
+- ✅ **六维评分引擎** — 动量25+风控20+风调15+质量15+估值15+景气10，支持自定义权重
+- ✅ **数据适配器** — 东方财富(A股列表/K线/基本面/财报) + 新浪(实时行情) + MCP deepq-finance(恐贪/温度/板块/观点)
+- ✅ **推荐管道** — 过滤(>2000亿大票/ST/退市/亏损) → K线获取 → 六维评分 → Top 10中盘成长股
+- ✅ **五维预测引擎** — 情绪30+技术25+宽度20+板块15+日历10 → 买/不买 + 波动区间 + 自动复盘
+- ✅ **八项技术指标** — MA/RSI/MACD/BOLL/KDJ/OBV/趋势判断/OBV背离
+- ✅ **策略回测** — 历史评分模拟 → 收益追踪 → 胜率/Alpha → 有效性验证
+- ✅ **止盈止损** — 移动止盈/目标止盈/评分下降/技术止损四策略
+- ✅ **八前端页面** — 仪表盘/推荐/查询/对比/回测/持仓/筛选/市场
+- ✅ **响应式** — 桌面全功能 + 移动汉堡菜单
+- ✅ **11个API** — recommend/search/compare/backtest/screener/market/predict/sector/portfolio(CRUD+Export)/watchlist(CRUD)
+- ✅ **6张数据表** — stocks/stock_scores/stock_recommendations/stock_portfolio/predictions/watchlist
+- ✅ **定时调度** — 15:30 推荐刷新 + 15:35 预测生成
 
-### 优先级 3: 迭代优化
-- 前端移动端响应式适配
-- 策略回测功能（用历史数据验证评分模型）
-- 更多技术指标（布林带、KDJ、OBV）
-- 用户自定义评分权重
+## 接下来要做的事（后续迭代）
+- 更多数据源接入（龙虎榜/北向资金/两融）
+- 实盘交易接口对接
+- AI 智能问答
+## 接下来要做的事（后续迭代）
+- 更多数据源接入（龙虎榜/北向资金/两融）
+- 实盘交易接口对接
+- AI 智能问答
 
 ## 关键文件索引
 
@@ -96,6 +111,32 @@ npm run dev          # 同时启动前后端
 | `packages/client/src/components/portfolio/InvestModal.tsx` | 定投计算弹窗 |
 | `packages/client/src/components/portfolio/AddFundForm.tsx` | 添加基金表单 |
 | `packages/client/src/components/ui/` | shadcn/ui 组件 (Button, Card) |
+
+### 股票模块
+| 文件 | 内容 |
+|------|------|
+| `packages/shared/src/types/stock.ts` | 股票 TypeScript 类型定义 |
+| `packages/shared/src/constants/stock.ts` | 股票评分权重、阈值、行业映射常量 |
+| `packages/server/src/adapters/stock.ts` | 东方财富 + 新浪股票数据适配器 |
+| `packages/server/src/services/stock-scoring.ts` | 股票六维评分引擎 |
+| `packages/server/src/services/stock-recommend.ts` | 股票每日推荐管道 |
+| `packages/server/src/routes/stock-search.ts` | GET /api/stocks/search?code=X |
+| `packages/server/src/routes/stock-recommend.ts` | GET /api/stocks/recommend |
+| `packages/client/src/pages/StockRecommendPage.tsx` | 股票推荐页面 |
+| `packages/client/src/pages/StockSearchPage.tsx` | 股票查询分析页面 |
+| `packages/client/src/hooks/useStockRecommendations.ts` | 股票推荐 hook |
+| `packages/client/src/hooks/useStockSearch.ts` | 股票查询 hook |
+| `packages/server/src/routes/stock-portfolio.ts` | 股票持仓 CRUD API |
+| `packages/client/src/pages/StockPortfolioPage.tsx` | 股票持仓管理页面 |
+| `packages/client/src/hooks/useStockPortfolio.ts` | 股票持仓 hook |
+| `packages/server/src/services/stock-screener.ts` | 多条件股票筛选服务 |
+| `packages/server/src/routes/stock-screener.ts` | GET /api/stocks/screener |
+| `packages/client/src/pages/StockScreenerPage.tsx` | 股票筛选器页面 |
+| `packages/client/src/hooks/useStockScreener.ts` | 股票筛选 hook |
+| `packages/server/src/services/stock-market.ts` | A股市场概览服务 |
+| `packages/server/src/routes/stock-market.ts` | GET /api/stocks/market |
+| `packages/client/src/pages/StockMarketPage.tsx` | A股市场概览页面 |
+| `packages/client/src/hooks/useStockMarket.ts` | 市场数据 hook |
 
 ## 常见命令
 ```bash

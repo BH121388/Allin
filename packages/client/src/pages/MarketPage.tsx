@@ -20,7 +20,7 @@ function fmtInflow(n: number): string {
 
 function Skeleton() {
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6 animate-pulse">
+    <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-6 animate-pulse">
       {/* Header skeleton */}
       <div className="flex items-center justify-between">
         <div>
@@ -503,7 +503,7 @@ export default function MarketPage() {
   // Error state
   if (error && !data) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <Card>
           <CardContent className="flex flex-col items-center py-16 gap-4">
             <p className="text-red-500 text-sm">{error}</p>
@@ -519,7 +519,7 @@ export default function MarketPage() {
   // No data
   if (!data) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <Card>
           <CardContent className="flex flex-col items-center py-16">
             <p className="text-muted-foreground text-sm">暂无市场数据</p>
@@ -530,7 +530,7 @@ export default function MarketPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+    <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>

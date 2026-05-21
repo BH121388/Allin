@@ -278,6 +278,214 @@ export function getTrendSignal(navData: NAVEntry[]): TrendInfo {
 }
 
 // ============================================================
+// BOLL — 布林带
+// ============================================================
+
+export interface BollingerBands {
+  upper: number;
+  middle: number;
+  lower: number;
+  bandwidth: number;  // (upper - lower) / middle * 100
+  percentB: number;   // (price - lower) / (upper - lower) — 当前价格在带宽中的位置
+}
+
+/**
+ * 计算布林带 BOLL(20, 2)。
+ */
+export function calcBollingerBands(navData: NAVEntry[], period = 20, multiplier = 2): BollingerBands | null {
+  if (navData.length < period) return null;
+
+  const prices = navData.slice(-period).map(e => e.nav);
+  const currentPrice = prices[prices.length - 1];
+
+  // MA20 (中轨)
+  const middle = prices.reduce((a, b) => a + b, 0) / period;
+
+  // 标准差
+  const variance = prices.reduce((s, p) => s + (p - middle) ** 2, 0) / period;
+  const stdDev = Math.sqrt(variance);
+
+  const upper = middle + multiplier * stdDev;
+  const lower = middle - multiplier * stdDev;
+  const bandwidth = middle > 0 ? ((upper - lower) / middle) * 100 : 0;
+  const percentB = upper - lower > 0 ? (currentPrice - lower) / (upper - lower) : 0.5;
+
+  return {
+    upper: parseFloat(upper.toFixed(4)),
+    middle: parseFloat(middle.toFixed(4)),
+    lower: parseFloat(lower.toFixed(4)),
+    bandwidth: parseFloat(bandwidth.toFixed(2)),
+    percentB: parseFloat(percentB.toFixed(4)),
+  };
+}
+
+// ============================================================
+// KDJ — 随机指标
+// ============================================================
+
+export interface KDJ {
+  k: number;
+  d: number;
+  j: number;
+  signal: 'overbought' | 'oversold' | 'neutral';
+  description: string;
+}
+
+/**
+ * 计算 KDJ(9, 3, 3)。
+ *
+ * RSV = (C - L9) / (H9 - L9) * 100
+ * K = 2/3 * prevK + 1/3 * RSV
+ * D = 2/3 * prevD + 1/3 * K
+ * J = 3*K - 2*D
+ */
+export function calcKDJ(navData: NAVEntry[], period = 9): KDJ | null {
+  if (navData.length < period + 2) return null;
+
+  const prices = navData.map(e => e.nav);
+
+  // 找最近 period 日的最高价和最低价
+  const window = prices.slice(-period);
+  const highest = Math.max(...window);
+  const lowest = Math.min(...window);
+  const current = prices[prices.length - 1];
+
+  // RSV
+  const rsv = highest - lowest > 0
+    ? ((current - lowest) / (highest - lowest)) * 100
+    : 50;
+
+  // 用 Wilder 平滑递推计算 K 和 D（近似取近 3 个 RSV 的加权）
+  // 简化：获取前两日的 K/D，如果数据量不够则用 RSV 初始化
+  let k = rsv;
+  let d = rsv;
+
+  // 递推近 10 个 RSV 来平滑近似 K/D
+  if (prices.length >= period + 5) {
+    let kVal = 50, dVal = 50;
+    for (let i = period; i < prices.length; i++) {
+      const win = prices.slice(Math.max(0, i - period + 1), i + 1);
+      const h = Math.max(...win);
+      const l = Math.min(...win);
+      const c = prices[i];
+      const r = h - l > 0 ? ((c - l) / (h - l)) * 100 : 50;
+      kVal = (2 / 3) * kVal + (1 / 3) * r;
+      dVal = (2 / 3) * dVal + (1 / 3) * kVal;
+    }
+    k = kVal;
+    d = dVal;
+  }
+
+  const j = 3 * k - 2 * d;
+
+  let signal: KDJ['signal'];
+  let description: string;
+  if (j > 100) {
+    signal = 'overbought'; description = 'J值超买，短期回调风险较大';
+  } else if (j < 0) {
+    signal = 'oversold'; description = 'J值超卖，可能出现技术反弹';
+  } else if (k > 80 && d > 80) {
+    signal = 'overbought'; description = 'KD高位钝化，注意回调风险';
+  } else if (k < 20 && d < 20) {
+    signal = 'oversold'; description = 'KD低位，存在反弹机会';
+  } else if (k > d && j > k) {
+    signal = 'neutral'; description = 'KDJ多头排列，短期偏强';
+  } else if (k < d && j < k) {
+    signal = 'neutral'; description = 'KDJ空头排列，短期偏弱';
+  } else {
+    signal = 'neutral'; description = 'KDJ震荡，方向不明';
+  }
+
+  return {
+    k: parseFloat(k.toFixed(2)),
+    d: parseFloat(d.toFixed(2)),
+    j: parseFloat(j.toFixed(2)),
+    signal,
+    description,
+  };
+}
+
+// ============================================================
+// OBV — 能量潮
+// ============================================================
+
+export interface OBVResult {
+  latestOBV: number;
+  obvMA: number;       // OBV 的 MA20
+  divergence: 'bullish' | 'bearish' | 'none';
+  description: string;
+}
+
+/**
+ * 计算 OBV 能量潮指标。
+ * 由于 NAV 数据没有成交量，此处用日收益率的绝对值作为"能量"代理。
+ *
+ * 对于股票（有成交量的 K线数据），应使用真实成交量。
+ * 此实现同时支持 NAV 数据和 StockKLine 数据。
+ */
+export function calcOBV(prices: Array<{ close: number; volume?: number; dailyReturn?: number }>): OBVResult | null {
+  if (prices.length < 20) return null;
+
+  // 计算代理成交量：用 |日收益| * 基准量
+  const baseVol = 1000000;
+  const obv: number[] = [0];
+
+  for (let i = 1; i < prices.length; i++) {
+    const prev = obv[i - 1];
+    const currPrice = prices[i].close;
+    const prevPrice = prices[i - 1].close;
+
+    // 使用真实成交量或代理成交量
+    let vol: number;
+    const realVol = prices[i].volume ?? 0;
+    const dailyRet = prices[i].dailyReturn ?? 0;
+    if (realVol > 0) {
+      vol = realVol;
+    } else if (dailyRet !== 0) {
+      vol = Math.abs(dailyRet) * baseVol;
+    } else {
+      vol = baseVol;
+    }
+
+    if (currPrice > prevPrice) {
+      obv.push(prev + vol);
+    } else if (currPrice < prevPrice) {
+      obv.push(prev - vol);
+    } else {
+      obv.push(prev);
+    }
+  }
+
+  const latestOBV = obv[obv.length - 1];
+  const obvSlice = obv.slice(-20);
+  const obvMA = obvSlice.reduce((a, b) => a + b, 0) / obvSlice.length;
+
+  // 背离判断：价格新高但OBV未新高 = 顶背离
+  const priceSlice = prices.slice(-20);
+  const priceHigh = Math.max(...priceSlice.map(p => p.close));
+  const obvHigh = Math.max(...obvSlice);
+  const priceLow = Math.min(...priceSlice.map(p => p.close));
+  const obvLow = Math.min(...obvSlice);
+
+  let divergence: OBVResult['divergence'] = 'none';
+  let description = 'OBV与价格同步，无明显背离';
+
+  const currentPrice = prices[prices.length - 1].close;
+  if (currentPrice >= priceHigh * 0.98 && latestOBV < obvHigh * 0.9) {
+    divergence = 'bearish'; description = '顶背离：价格高位但OBV未配合，警惕回调';
+  } else if (currentPrice <= priceLow * 1.02 && latestOBV > obvLow * 1.1) {
+    divergence = 'bullish'; description = '底背离：价格低位但OBV抬升，可能见底';
+  }
+
+  return {
+    latestOBV: Math.round(latestOBV),
+    obvMA: Math.round(obvMA),
+    divergence,
+    description,
+  };
+}
+
+// ============================================================
 // 自测入口 — 直接执行此文件时运行
 // ============================================================
 
