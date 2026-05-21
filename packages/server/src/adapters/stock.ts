@@ -68,7 +68,7 @@ export async function fetchAllStocks(): Promise<StockInfo[]> {
 
   const params = new URLSearchParams({
     pn: '1',
-    pz: '5000',
+    pz: '10000',
     po: '1',
     np: '1',
     fltt: '2',
@@ -213,6 +213,69 @@ export async function fetchStockKLine(code: string, days = 90): Promise<StockKLi
     klineCache.set(cacheKey, { data: result, at: Date.now() });
     return result;
   }
+}
+
+// ============================================================
+// 单只股票直接查询（搜索兜底）
+// ============================================================
+
+/** 直接查询单只股票基本信息，优先用东方财富，兜底用新浪 */
+export async function fetchStockByCode(code: string): Promise<StockInfo | null> {
+  // 1. 尝试东方财富 push2 API
+  try {
+    const prefix = code.startsWith('6') ? '1' : '0';
+    const secid = `${prefix}.${code}`;
+    const fields = ['f2', 'f3', 'f4', 'f9', 'f12', 'f13', 'f14', 'f20', 'f21', 'f23', 'f37', 'f100', 'f115', 'f116', 'f117'];
+    const url = `http://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields.join(',')}`;
+
+    const resp = await fetchWithTimeout(url);
+    if (resp && resp.ok) {
+      const body = await resp.json() as { data?: Record<string, unknown> };
+      if (body.data && body.data.f12) {
+        const d = body.data;
+        const pe = Number(d.f9 || 0);
+        const roeRaw = Number(d.f37 || 0);
+        return {
+          code: String(d.f12), name: String(d.f14 || ''), industry: String(d.f100 || ''), subIndustry: '',
+          marketCap: Number(d.f20 || 0) / 1e8, totalCap: Number(d.f21 || 0) / 1e8,
+          pe, pb: Number(d.f23 || 0),
+          roe: Math.abs(roeRaw) < 1 ? Math.round(roeRaw * 1000) / 10 : Math.round(roeRaw * 10) / 10,
+          revenueGrowth: Number(d.f115 || 0), profitGrowth: Number(d.f116 || 0),
+          netProfitMargin: 0, inception: String(d.f117 || ''), exchange: String(d.f13 || ''),
+        };
+      }
+    }
+  } catch { /* fall through */ }
+
+  // 2. 兜底：新浪行情 API（已验证可用），从价格数据反推基本信息
+  try {
+    const quote = await fetchSingleStockQuote(code);
+    if (quote && quote.price > 0) {
+      // 从新浪 API 获取基本名称
+      const prefix = code.startsWith('6') ? 'sh' : 'sz';
+      const url = `https://hq.sinajs.cn/list=${prefix}${code}`;
+      const resp = await fetchWithTimeout(url, { headers: { Referer: 'https://finance.sina.com.cn/' } });
+      if (resp && resp.ok) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const iconv = await import('iconv-lite');
+        const text = iconv.default.decode(buf, 'gbk');
+        const m = text.match(/"([^"]*)"/);
+        if (m) {
+          const fields = m[1].split(',');
+          const name = fields[0] || code;
+          const exchange = code.startsWith('6') ? 'SH' : code.startsWith('0') || code.startsWith('3') ? 'SZ' : 'BJ';
+          return {
+            code, name, industry: '', subIndustry: '',
+            marketCap: 0, totalCap: 0, pe: 0, pb: 0, roe: 0,
+            revenueGrowth: 0, profitGrowth: 0, netProfitMargin: 0,
+            inception: '', exchange,
+          };
+        }
+      }
+    }
+  } catch { /* fall through */ }
+
+  return null;
 }
 
 // ============================================================

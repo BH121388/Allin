@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, StockAnalysis, StockInfo, StockSignalResult, StockRiskMetrics, StockPeerComparison, StockScore } from '@allin/shared';
-import { getMockStocks, getMockKLine, fetchAllStocks, fetchStockKLine, fetchSingleStockQuote, fetchStockFundamentals, fetchFinancialSummary, type StockKLine } from '../adapters/stock.js';
+import { getMockStocks, getMockKLine, fetchAllStocks, fetchStockKLine, fetchSingleStockQuote, fetchStockFundamentals, fetchFinancialSummary, fetchStockByCode, type StockKLine } from '../adapters/stock.js';
 import { scoreStock, getStockGrade, calcStockRiskMetrics, recalcTotalWithWeights } from '../services/stock-scoring.js';
 import { getDb } from '../db/index.js';
 import { calcRSI, calcMACD, calcMA, getTrendSignal, calcBollingerBands, calcKDJ, calcOBV, type BollingerBands, type KDJ, type OBVResult } from '../services/technical.js';
@@ -32,9 +32,14 @@ router.get('/stocks/search', async (req: Request, res: Response) => {
       return;
     }
 
-    // 1. 查找股票
+    // 1. 查找股票：先查全量列表，再直查API，最后mock
     const allStocks = await fetchAllStocks();
     let stock = allStocks.find(s => s.code === code);
+
+    if (!stock) {
+      // 不在缓存列表中，直接查询单只股票（兜底）
+      stock = await fetchStockByCode(code) ?? undefined;
+    }
 
     if (!stock) {
       const mockStocks = getMockStocks();
