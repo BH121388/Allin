@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, FundInfo, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
-import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, estimateIntradayNAV, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, fetchFundHoldings, fetchStockChanges, lookupStockName, estimateIntradayNAV, type NAVEntry } from '../adapters/eastmoney.js';
 import { scoreFund, scoreAllFunds, scoreAllFundsUnified, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
@@ -65,8 +65,9 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
     let navData = getMockNAV(code);
     let currentNav: number | undefined;
     let navDate: string | undefined;
+    let detail: Awaited<ReturnType<typeof fetchFundDetail>> = null;
     try {
-      const detail = await fetchFundDetail(code);
+      detail = await fetchFundDetail(code);
       if (detail && detail.navHistory.length > 0) {
         navData = detail.navHistory;
         const latest = detail.navHistory[detail.navHistory.length - 1];
@@ -125,11 +126,40 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
     // 8. 风险指标
     const riskMetrics = computeRiskMetrics(navData);
 
-    // 9. 持仓（mock）
-    const holdings = generateHoldings(fund.code, fund.name, fund.type);
+    // 9. 持仓（真实数据 + 实时行情）
+    let holdings: TopHolding[] = [];
+    let sectorTags: string[] = [];
+    try {
+      const [holdingsDetail] = await Promise.all([
+        fetchFundHoldings(code),
+      ]);
+      if (holdingsDetail.length > 0) {
+        const stockCodes = holdingsDetail.map(h => h.stockCode);
+        const changes = await fetchStockChanges(stockCodes);
+        holdings = holdingsDetail.slice(0, 10).map(h => ({
+          stockCode: h.stockCode,
+          stockName: h.stockName || lookupStockName(h.stockCode) || h.stockCode,
+          weight: h.weight,
+          changeToday: changes.get(h.stockCode) ?? 0,
+        }));
+        sectorTags = deriveRealSectorTags(holdings.map(h => h.stockName));
+      } else if (detail && detail.stockCodes.length > 0) {
+        const codes = detail.stockCodes.slice(0, 10);
+        const changes = await fetchStockChanges(codes);
+        holdings = codes.map(sc => ({
+          stockCode: sc,
+          stockName: lookupStockName(sc) || sc,
+          weight: Math.round((100 / codes.length) * 100) / 100,
+          changeToday: changes.get(sc) ?? 0,
+        }));
+        sectorTags = deriveRealSectorTags(holdings.map(h => h.stockName));
+      }
+    } catch { /* holdings fetch failed, leave empty */ }
 
-    // 10. 行业标签
-    const sectorTags = deriveSectorTags(fund.name, fund.type);
+    // 10. 行业标签（兜底：基于基金名称）
+    if (sectorTags.length === 0) {
+      sectorTags = deriveSectorTags(fund.name, fund.type);
+    }
 
     // 11. 同业比较
     const peerComparison = estimatePeerComparison(fund, navData, score);
@@ -278,103 +308,43 @@ function calcReturnFrom(navData: NAVEntry[], lookbackDays: number): number {
 }
 
 // ============================================================
-// Mock 持仓生成
+// 行业标签推导 — 基于真实股票名称
 // ============================================================
 
-interface StockTemplate {
-  code: string;
-  name: string;
-  baseWeight: number;
+function deriveRealSectorTags(stockNames: string[]): string[] {
+  const keywordMap: Record<string, string> = {
+    '茅台':'消费','五粮液':'消费','泸州':'消费','伊利':'消费','海天':'消费',
+    '美的':'消费','格力':'消费','苏泊尔':'消费','牧原':'消费','双汇':'消费',
+    '宁德':'新能源','比亚迪':'新能源','隆基':'新能源','阳光':'新能源',
+    '通威':'新能源','亿纬':'新能源','天合':'新能源','晶澳':'新能源',
+    '锦浪':'新能源','派能':'新能源','恩捷':'新能源',
+    '迈瑞':'医药','恒瑞':'医药','爱尔':'医药','药明':'医药','智飞':'医药',
+    '泰格':'医药','百济':'医药','信达':'医药','康希诺':'医药',
+    '科大':'科技-TMT','金山':'科技-TMT','海康':'科技-TMT','立讯':'科技-TMT',
+    '新易盛':'科技-TMT','中际':'科技-TMT','天孚':'科技-TMT','寒武纪':'科技-TMT',
+    '海光':'科技-TMT','北方华创':'科技-TMT','中芯':'科技-TMT','长电':'科技-TMT',
+    '紫光':'科技-TMT','兆易':'科技-TMT','腾讯':'科技-TMT','阿里':'科技-TMT',
+    '美团':'科技-TMT','小米':'科技-TMT','中兴':'科技-TMT','歌尔':'科技-TMT',
+    '绿的':'制造','埃斯顿':'制造','拓斯达':'制造','机器人':'制造','汇川':'制造',
+    '三一':'制造','潍柴':'制造',
+    '招商银行':'金融地产','平安':'金融地产','兴业':'金融地产',
+    '万科':'金融地产','保利':'金融地产',
+    '航发':'军工','中航':'军工','航天':'军工','中国船舶':'军工',
+    '长江电力':'公用事业','中国核电':'公用事业',
+    '紫金':'能源材料','神华':'能源材料','宝钢':'能源材料','万华':'能源材料',
+  };
+  const tagScores = new Map<string, number>();
+  for (const name of stockNames) {
+    if (!name) continue;
+    for (const [kw, tag] of Object.entries(keywordMap)) {
+      if (name.includes(kw)) {
+        tagScores.set(tag, (tagScores.get(tag) || 0) + 1);
+      }
+    }
+  }
+  if (tagScores.size === 0) return stockNames.length > 0 ? ['混合持仓'] : [];
+  return [...tagScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
 }
-
-const HOLDING_TEMPLATES: Record<string, StockTemplate[]> = {
-  // 蓝筹/消费类
-  bluechip: [
-    { code: '600519', name: '贵州茅台', baseWeight: 9.2 },
-    { code: '000858', name: '五粮液', baseWeight: 7.8 },
-    { code: '000568', name: '泸州老窖', baseWeight: 5.6 },
-    { code: '600887', name: '伊利股份', baseWeight: 4.3 },
-    { code: '002415', name: '海康威视', baseWeight: 3.8 },
-  ],
-  // 新能源/制造
-  newEnergy: [
-    { code: '300750', name: '宁德时代', baseWeight: 9.5 },
-    { code: '002594', name: '比亚迪', baseWeight: 7.2 },
-    { code: '601012', name: '隆基绿能', baseWeight: 6.1 },
-    { code: '300274', name: '阳光电源', baseWeight: 4.8 },
-    { code: '600438', name: '通威股份', baseWeight: 3.5 },
-  ],
-  // 医药
-  medical: [
-    { code: '300760', name: '迈瑞医疗', baseWeight: 8.5 },
-    { code: '600276', name: '恒瑞医药', baseWeight: 7.0 },
-    { code: '300015', name: '爱尔眼科', baseWeight: 5.8 },
-    { code: '300122', name: '智飞生物', baseWeight: 4.6 },
-    { code: '600196', name: '复星医药', baseWeight: 3.2 },
-  ],
-  // 科技
-  tech: [
-    { code: '002230', name: '科大讯飞', baseWeight: 7.5 },
-    { code: '688111', name: '金山办公', baseWeight: 6.2 },
-    { code: '300124', name: '汇川技术', baseWeight: 5.0 },
-    { code: '002475', name: '立讯精密', baseWeight: 4.8 },
-    { code: '300661', name: '圣邦股份', baseWeight: 3.6 },
-  ],
-  // 金融/大盘
-  financial: [
-    { code: '601318', name: '中国平安', baseWeight: 8.0 },
-    { code: '600036', name: '招商银行', baseWeight: 7.0 },
-    { code: '601166', name: '兴业银行', baseWeight: 5.5 },
-    { code: '600030', name: '中信证券', baseWeight: 4.2 },
-    { code: '601398', name: '工商银行', baseWeight: 3.0 },
-  ],
-  // 白酒消费
-  baijiu: [
-    { code: '600519', name: '贵州茅台', baseWeight: 14.5 },
-    { code: '000858', name: '五粮液', baseWeight: 12.8 },
-    { code: '000568', name: '泸州老窖', baseWeight: 9.5 },
-    { code: '002304', name: '洋河股份', baseWeight: 6.8 },
-    { code: '000596', name: '古井贡酒', baseWeight: 4.2 },
-  ],
-  // 默认
-  default: [
-    { code: '600519', name: '贵州茅台', baseWeight: 6.0 },
-    { code: '601318', name: '中国平安', baseWeight: 5.0 },
-    { code: '000858', name: '五粮液', baseWeight: 4.5 },
-    { code: '300750', name: '宁德时代', baseWeight: 4.0 },
-    { code: '600036', name: '招商银行', baseWeight: 3.5 },
-  ],
-};
-
-function pickTemplate(code: string, name: string, type: string): StockTemplate[] {
-  const combined = `${name}${type}`;
-  if (combined.includes('白酒')) return HOLDING_TEMPLATES.baijiu;
-  if (combined.includes('蓝筹') || combined.includes('精选')) return HOLDING_TEMPLATES.bluechip;
-  if (combined.includes('能源') || combined.includes('新能源')) return HOLDING_TEMPLATES.newEnergy;
-  if (combined.includes('医疗') || combined.includes('医药')) return HOLDING_TEMPLATES.medical;
-  if (combined.includes('创新') || combined.includes('科技') || combined.includes('成长')) return HOLDING_TEMPLATES.tech;
-  if (combined.includes('50') || combined.includes('沪深300') || combined.includes('价值')) return HOLDING_TEMPLATES.financial;
-  if (type.includes('QDII')) return HOLDING_TEMPLATES.tech;
-  return HOLDING_TEMPLATES.default;
-}
-
-function generateHoldings(code: string, name: string, type: string): TopHolding[] {
-  const template = pickTemplate(code, name, type);
-  // 基于基金代码的确定性随机种子
-  const seed = hashCode(code);
-  const rng = createRNG(seed);
-
-  return template.map((t) => ({
-    stockCode: t.code,
-    stockName: t.name,
-    weight: Math.round((t.baseWeight + (rng() - 0.5) * 2) * 100) / 100, // ±1% 扰动
-    changeToday: Math.round((rngNormal(rng) * 2.5) * 100) / 100, // 今日涨跌幅
-  }));
-}
-
-// ============================================================
-// 行业标签推导
-// ============================================================
 
 function deriveSectorTags(name: string, type: string): string[] {
   const combined = `${name}${type}`.toLowerCase();
@@ -518,38 +488,6 @@ function buildAnalysisText(
   ];
 
   return parts.join('');
-}
-
-// ============================================================
-// 工具函数 — 确定性随机数
-// ============================================================
-
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function createRNG(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function rngNormal(rng: () => number): number {
-  const u1 = rng();
-  const u2 = rng();
-  const safeU1 = u1 === 0 ? 0.0001 : u1;
-  return Math.sqrt(-2 * Math.log(safeU1)) * Math.cos(2 * Math.PI * u2);
 }
 
 export default router;

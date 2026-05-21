@@ -69,7 +69,11 @@ export default function AddFundForm({ onAdd }: AddFundFormProps) {
       return;
     }
 
-    const costNav = fundInfo.currentNav;
+    // 成本价 = 最近已公布的官方净值（非盘中估算），来自 navHistory 最后一条
+    const lastOfficialNav = fundInfo.navHistory && fundInfo.navHistory.length > 0
+      ? fundInfo.navHistory[fundInfo.navHistory.length - 1].nav
+      : undefined;
+    const costNav = lastOfficialNav ?? fundInfo.currentNav;
     if (!costNav || costNav <= 0) {
       setError('无法获取当前净值，请稍后重试');
       return;
@@ -138,22 +142,35 @@ export default function AddFundForm({ onAdd }: AddFundFormProps) {
             </div>
           </div>
 
-          {fundInfo && (
+          {fundInfo && (() => {
+            const lastNav = fundInfo.navHistory && fundInfo.navHistory.length > 0
+              ? fundInfo.navHistory[fundInfo.navHistory.length - 1].nav
+              : fundInfo.currentNav;
+            const lastNavDate = fundInfo.navHistory && fundInfo.navHistory.length > 0
+              ? fundInfo.navHistory[fundInfo.navHistory.length - 1].date
+              : fundInfo.navDate;
+            const isIntraday = fundInfo.currentNav != null && lastNav != null &&
+              Math.abs(fundInfo.currentNav - lastNav) > 0.0001;
+            return (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-blue-50 rounded-lg text-xs">
               <span className="font-medium text-slate-700">{fundInfo.name}</span>
               <span className="text-slate-500">
-                当前净值 <span className="font-mono font-medium text-slate-700">{fundInfo.currentNav?.toFixed(4)}</span>
+                成本净值 <span className="font-mono font-medium text-slate-700">{lastNav?.toFixed(4)}</span>
+                <span className="text-slate-400 ml-1">({lastNavDate})</span>
               </span>
-              {fundInfo.navDate && (
-                <span className="text-slate-400">{fundInfo.navDate}</span>
+              {isIntraday && (
+                <span className="text-slate-400">
+                  盘中估算 <span className="font-mono text-orange-600">{fundInfo.currentNav?.toFixed(4)}</span>
+                </span>
               )}
               <span className="text-slate-500">
                 份额 <span className="font-mono font-medium text-slate-700">
-                  {amount ? (Number(amount) / (fundInfo.currentNav || 1)).toFixed(2) : '—'}
+                  {amount && lastNav ? (Number(amount) / lastNav).toFixed(2) : '—'}
                 </span>
               </span>
             </div>
-          )}
+            );
+          })()}
 
           {error && (
             <p className="text-sm text-red-500">{error}</p>
