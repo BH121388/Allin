@@ -5,3 +5,17 @@ data/
 *.log
 .DS_Store
 .memory/
+.claude/
+
+# Build artifacts
+*.tsbuildinfo
+package-lock.json
+
+# Temp files
+*.tmp
+tmp/
+temp/
+
+# IDE
+.vscode/
+.idea/
