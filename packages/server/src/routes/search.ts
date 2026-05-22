@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundAnalysis, FundInfo, RiskMetrics, TopHolding, PeerComparison, FundScore } from '@allin/shared';
-import { fetchAllFunds, getMockFunds, getMockNAV, fetchFundDetail, fetchFundHoldings, fetchStockChanges, lookupStockName, estimateIntradayNAV, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, fetchFundDetail, fetchFundHoldings, fetchStockChanges, lookupStockName, estimateIntradayNAV, type NAVEntry } from '../adapters/eastmoney.js';
 import { scoreFund, scoreAllFunds, scoreAllFundsUnified, calcMaxDrawdown, calcAnnualVolatility, calcSharpe } from '../services/scoring.js';
 import { generateSignal } from '../services/signals.js';
 import { getTrendSignal } from '../services/technical.js';
@@ -34,35 +34,32 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
       return;
     }
 
-    // 1. 查找基金：优先从真实 API 搜索，降级到 mock
+    // 1. 从真实API查找基金
     const allFunds = await fetchAllFunds();
     let fund = allFunds.find((f) => f.code === code);
 
-    // 真实数据中的 FundInfo 缺少部分字段，用 mock 数据补全
-    if (fund) {
-      const mockFunds = getMockFunds();
-      const mockMatch = mockFunds.find((f) => f.code === code);
-      if (mockMatch) {
-        fund = { ...fund, ...mockMatch }; // mock 数据覆盖缺失字段
-      }
-    } else {
-      // 真实 API 中没找到，尝试 mock（兼容之前的行为）
-      const mockFunds = getMockFunds();
-      fund = mockFunds.find((f) => f.code === code);
+    if (!fund) {
+      // 尝试直接获取基金详情
+      try {
+        const detail = await fetchFundDetail(code);
+        if (detail) {
+          fund = { code, name: detail.name, type: '', company: '', manager: '', tenure: '', managerReturn: '', scale: 0, inception: '' };
+        }
+      } catch { /* skip */ }
     }
 
     if (!fund) {
       const body: ApiResponse<never> = {
         success: false,
-        error: '基金代码不存在',
+        error: '基金代码不存在或数据源不可用',
         timestamp: new Date().toISOString(),
       };
       res.status(404).json(body);
       return;
     }
 
-    // 2. 获取净值数据（优先真实 API，降级为 mock）
-    let navData = getMockNAV(code);
+    // 2. 获取真实净值数据
+    let navData: NAVEntry[] = [];
     let currentNav: number | undefined;
     let navDate: string | undefined;
     let detail: Awaited<ReturnType<typeof fetchFundDetail>> = null;
@@ -74,9 +71,7 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
         currentNav = latest.nav;
         navDate = latest.date;
       }
-    } catch {
-      // 降级为 mock
-    }
+    } catch { /* API不可用 */ }
 
     // 2.5 盘中估算净值
     let todayChange = 0;
@@ -93,18 +88,11 @@ router.get('/funds/search', async (_req: Request, res: Response) => {
       }
     } catch { /* skip */ }
 
-    // 3. 统一评分 — 确保被查询的基金在评分列表中
-    const scoreFunds: FundInfo[] = [...getMockFunds()];
-    if (!scoreFunds.find(f => f.code === fund.code)) {
-      scoreFunds.push(fund);
-    }
+    // 3. 评分（仅对该基金评分，不需要peer对比）
     const navMap = new Map<string, NAVEntry[]>();
     navMap.set(fund.code, navData);
-    for (const mf of scoreFunds) {
-      if (mf.code !== fund.code) navMap.set(mf.code, getMockNAV(mf.code));
-    }
-    const allScores = scoreAllFundsUnified(scoreFunds, navMap);
-    const score = allScores.get(fund.code)!;
+    const allScores = scoreAllFundsUnified([fund], navMap);
+    const score = allScores.get(fund.code) || { momentum: 0, riskControl: 0, riskAdjusted: 0, manager: 0, scale: 0, sectorMatch: 0, total: 0 };
 
     // 4. 交易信号
     const signal = generateSignal(fund, score, navData);

@@ -26,11 +26,11 @@ function getBarColor(ratio: number): string {
 }
 
 function getGrade(score: number): { stars: string; label: string; color: string } {
-  if (score >= 85) return { stars: '⭐⭐⭐⭐⭐', label: '强烈推荐', color: 'text-emerald-600' };
-  if (score >= 70) return { stars: '⭐⭐⭐⭐', label: '推荐', color: 'text-emerald-500' };
+  if (score >= 85) return { stars: '⭐⭐⭐⭐⭐', label: '强烈推荐', color: 'text-red-600' };
+  if (score >= 70) return { stars: '⭐⭐⭐⭐', label: '推荐', color: 'text-red-500' };
   if (score >= 60) return { stars: '⭐⭐⭐', label: '中性', color: 'text-amber-500' };
   if (score >= 50) return { stars: '⭐⭐', label: '谨慎', color: 'text-amber-600' };
-  return { stars: '⭐', label: '回避', color: 'text-red-500' };
+  return { stars: '⭐', label: '回避', color: 'text-green-500' };
 }
 
 // ---- Sub-components ----
@@ -127,7 +127,7 @@ function FundReport({ fund }: { fund: FundAnalysis }) {
             <div className="flex items-center gap-1.5">
               <BarChart3 className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-slate-500">任职回报:</span>
-              <span className={cn('font-medium font-mono', fund.managerReturn?.startsWith('+') ? 'text-emerald-600' : 'text-red-500')}>
+              <span className={cn('font-medium font-mono', fund.managerReturn?.startsWith('+') ? 'text-red-600' : 'text-green-500')}>
                 {fund.managerReturn || '暂无数据'}
               </span>
             </div>
@@ -304,13 +304,13 @@ function FundReport({ fund }: { fund: FundAnalysis }) {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">本基金收益</span>
-                    <span className={cn('font-mono font-medium', fund.peerComparison.fundReturn >= 0 ? 'text-emerald-600' : 'text-red-500')}>
+                    <span className={cn('font-mono font-medium', fund.peerComparison.fundReturn >= 0 ? 'text-red-600' : 'text-green-500')}>
                       {fund.peerComparison.fundReturn >= 0 ? '+' : ''}{fund.peerComparison.fundReturn}%
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">同类平均</span>
-                    <span className={cn('font-mono font-medium', fund.peerComparison.categoryAvgReturn >= 0 ? 'text-emerald-600' : 'text-red-500')}>
+                    <span className={cn('font-mono font-medium', fund.peerComparison.categoryAvgReturn >= 0 ? 'text-red-600' : 'text-green-500')}>
                       {fund.peerComparison.categoryAvgReturn >= 0 ? '+' : ''}{fund.peerComparison.categoryAvgReturn}%
                     </span>
                   </div>

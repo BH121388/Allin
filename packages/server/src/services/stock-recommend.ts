@@ -6,7 +6,7 @@
 // ============================================================
 
 import type { StockInfo, StockAnalysis, StockScore, StockSignalResult, StockRiskMetrics, StockPeerComparison } from '@allin/shared';
-import { getMockStocks, getMockKLine, fetchAllStocks, fetchStockKLine, type StockKLine, type StockQuote } from '../adapters/stock.js';
+import { fetchAllStocks, fetchStockKLine, fetchStockByCode, fetchSingleStockQuote, clearStockCaches, type StockKLine } from '../adapters/stock.js';
 import { scoreStock, getStockGrade, calcStockRiskMetrics } from './stock-scoring.js';
 import { getDb } from '../db/index.js';
 
@@ -35,6 +35,10 @@ export async function getDailyStockRecommendations(
   }
 
   console.log('[stock-recommend] 开始执行股票推荐管道...');
+  // 强制刷新时清除K线缓存，确保每次重新拉取行情
+  if (forceRefresh) {
+    clearStockCaches();
+  }
   const result = await runPipeline();
   const { recommendations, totalScanned } = result;
   storeStockRecommendations(today, recommendations);
@@ -53,58 +57,100 @@ async function runPipeline(): Promise<{ recommendations: StockAnalysis[]; totalS
 
   // Step 2: 粗筛
   // 排除: ST/退市/大票(>2000亿)/微盘(<30亿)/冷门/同质化
-  const BIG_CAP_THRESHOLD = 2000; // 市值超过此值视为大票
-  const BIG_CAP_FILTER = new Set([
-    '600519', // 贵州茅台
-    '300750', // 宁德时代
-    '000858', // 五粮液
-    '601318', // 中国平安
-    '000333', // 美的集团
-    '002594', // 比亚迪
-    '600276', // 恒瑞医药
-    '600900', // 长江电力
-    '300760', // 迈瑞医疗
-    '601012', // 隆基绿能
-  ]);
+  // 判断是否使用精选列表（市值数据缺失时需要放宽筛选条件）
+  const hasMarketCap = allStocks.some(s => s.marketCap > 0);
 
   const candidates = allStocks.filter(s => {
     // ST/退市
     if (s.name.includes('ST') || s.name.includes('*ST') || s.name.includes('退市')) return false;
-    // 大票（市值>2000亿 或 在黑名单中）
-    if (s.marketCap >= BIG_CAP_THRESHOLD || BIG_CAP_FILTER.has(s.code)) return false;
-    // 微盘（<30亿）
-    if (s.marketCap < 30) return false;
+    // 市值过滤（仅当真实市值数据可用时：排除微盘<30亿）
+    if (hasMarketCap && s.marketCap < 30) return false;
+    // 冷门票：PE和ROE都为0说明数据缺失，放行
+    if (s.pe === 0 && s.roe === 0) return true;
     // 冷门票：PE为负且ROE为负（连续亏损）
     if (s.pe <= 0 && s.roe <= 0) return false;
-    // 同质化：排除名字高度重复的（如同花顺等名字极相似的会被自然稀释）
-    if (s.name.includes('同花顺') || s.name.includes('东方财富')) return false;
     return true;
   });
   console.log(`[stock-recommend] Step 2: 粗筛后 → ${candidates.length} 只`);
 
-  // 如果真实数据太少，补充 mock（已过滤大票）
-  let pool: StockInfo[];
-  let totalScanned: number;
-  if (candidates.length < 15) {
-    console.log('[stock-recommend] 真实数据不足，补充 mock 股票池');
-    const filteredMocks = getMockStocks().filter(s => !BIG_CAP_FILTER.has(s.code) && s.marketCap < BIG_CAP_THRESHOLD);
-    pool = [...candidates, ...filteredMocks];
-  } else {
-    // 按市值中段取候选（30-2000亿区间，优先取500-1500亿的中盘成长）
-    candidates.sort((a, b) => b.marketCap - a.marketCap);
-    // 去掉最大的前10%（以防万一），取市值中段的60只
-    const startIdx = Math.floor(candidates.length * 0.05); // 跳过前5%
-    const endIdx = Math.min(startIdx + 60, candidates.length);
-    pool = candidates.slice(startIdx, endIdx);
+  if (candidates.length === 0) {
+    console.warn('[stock-recommend] 无候选股票（API可能不可用）');
+    return { recommendations: [], totalScanned: 0 };
   }
-  totalScanned = pool.length;
-  console.log(`[stock-recommend] 候选池: ${pool.length} 只`);
 
-  // Step 3: 批量获取K线（并发 10）
+  // Step 2.5: 预筛（全量拉腾讯涨跌幅→PE+市值+涨跌综合→Top150做完整评分）
+  let pool: StockInfo[];
+  const totalScanned = candidates.length;
+  if (candidates.length > 150) {
+    // 并发拉取腾讯数据：涨跌幅+PE+PB+ROE+市值+名称（1000只约30秒，一次调用全拿到）
+    const tcData = new Map<string, { name: string; changePct: number; pe: number; pb: number; marketCap: number; totalCap: number; roe: number }>();
+    const batchSize = 30;
+    for (let i = 0; i < candidates.length; i += batchSize) {
+      const batch = candidates.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(async s => {
+          try {
+            const prefix = s.code.startsWith('6') ? 'sh' : 'sz';
+            const resp = await fetch(`http://qt.gtimg.cn/q=${prefix}${s.code}`);
+            if (!resp.ok) return null;
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const iconv = await import('iconv-lite');
+            const text = iconv.default.decode(buf, 'gbk');
+            const parts = text.split('~');
+            const pe = parseFloat(parts[39]) || 0;
+            const pb = parseFloat(parts[46]) || 0;
+            return {
+              code: s.code,
+              name: parts[1] || s.code,
+              changePct: parseFloat(parts[32]) || 0,
+              pe, pb,
+              marketCap: parseFloat(parts[44]) || 0,
+              totalCap: parseFloat(parts[45]) || 0,
+              roe: pb > 0 && pe > 0 ? Math.round((pb / pe) * 1000) / 10 : 0,
+            };
+          } catch { return null; }
+        })
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) {
+          tcData.set(r.value.code, r.value);
+          // 直接补充到候选股票对象（省去Step3的fetchStockByCode调用）
+          const s = candidates.find(c => c.code === r.value!.code);
+          if (s) {
+            if (r.value.name && s.name === s.code) s.name = r.value.name;
+            s.pe = r.value.pe || s.pe;
+            s.pb = r.value.pb || s.pb;
+            s.roe = r.value.roe || s.roe;
+            s.marketCap = r.value.marketCap || s.marketCap;
+            s.totalCap = r.value.totalCap || s.totalCap;
+          }
+        }
+      }
+    }
+    console.log(`[stock-recommend] 腾讯数据: ${tcData.size} 只（涨跌+PE+市值+名称）`);
+
+    const ranked = candidates.map(s => {
+      const chg = tcData.get(s.code)?.changePct || 0;
+      let qs = 0;
+      // 涨跌动量(0-35)
+      if (chg > 5) qs += 35; else if (chg > 2) qs += 25; else if (chg > 0) qs += 15; else if (chg > -2) qs += 8;
+      // 估值(0-35)
+      if (s.pe > 0 && s.pe < 10) qs += 35; else if (s.pe > 0 && s.pe < 20) qs += 25; else if (s.pe > 0 && s.pe < 30) qs += 15; else if (s.pe > 0 && s.pe < 50) qs += 8; else qs += 5;
+      // 市值(0-30)
+      if (s.marketCap >= 80 && s.marketCap < 300) qs += 30; else if (s.marketCap >= 50 && s.marketCap < 800) qs += 20; else if (s.marketCap >= 30 && s.marketCap < 2000) qs += 12; else qs += 5;
+      return { stock: s, qs };
+    }).sort((a, b) => b.qs - a.qs);
+    pool = ranked.slice(0, 150).map(r => r.stock);
+    console.log(`[stock-recommend] 预筛: ${candidates.length} → 150 只（PE+市值+实时涨跌）`);
+  } else {
+    pool = candidates;
+  }
+
+  // Step 3: 获取K线（基本面已在Step2.5从腾讯拿到，无需重复）
   const klineMap = new Map<string, StockKLine[]>();
-  const batchSize = 10;
-  for (let i = 0; i < pool.length; i += batchSize) {
-    const batch = pool.slice(i, i + batchSize);
+  const kBatchSize = 20;
+  for (let i = 0; i < pool.length; i += kBatchSize) {
+    const batch = pool.slice(i, i + kBatchSize);
     const results = await Promise.allSettled(
       batch.map(async (s) => {
         const klines = await fetchStockKLine(s.code);
@@ -129,16 +175,32 @@ async function runPipeline(): Promise<{ recommendations: StockAnalysis[]; totalS
   }
   console.log(`[stock-recommend] Step 4: 评分完成 ${scoreEntries.length} 只`);
 
-  // Step 5: 排序，过滤 ≥ 50 分，取前 10
+  // Step 5: 纯评分排序，取前 5（市值大小由评分体系自行衡量）
   const ranked = scoreEntries
-    .filter(({ score }) => score.total >= 50)
     .sort((a, b) => b.score.total - a.score.total)
-    .slice(0, 10);
+    .slice(0, 5);
 
-  // Step 6: 构建完整分析
+  // Step 6: 获取Top5实时报价（确保价格是最新的）
+  const top5Codes = ranked.map(r => r.stock.code);
+  const quoteResults = await Promise.allSettled(top5Codes.map(c => fetchSingleStockQuote(c)));
+  const quoteMap = new Map<string, number>();
+  const changeMap = new Map<string, number>();
+  for (let i = 0; i < top5Codes.length; i++) {
+    const qr = quoteResults[i];
+    if (qr.status === 'fulfilled' && qr.value) {
+      quoteMap.set(top5Codes[i], qr.value.price);
+      changeMap.set(top5Codes[i], qr.value.changePct);
+    }
+  }
+  console.log(`[stock-recommend] Step 5.5: 实时报价获取 ${quoteMap.size}/5 只`);
+
+  // Step 7: 构建完整分析
+  const generatedAt = new Date().toISOString();
   const results: StockAnalysis[] = ranked.map(({ stock, score }, index) => {
     const klines = klineMap.get(stock.code)!;
-    return buildStockAnalysis(stock, klines, score, totalScanned, index + 1);
+    const realPrice = quoteMap.get(stock.code);
+    const realChange = changeMap.get(stock.code);
+    return buildStockAnalysis(stock, klines, score, totalScanned, index + 1, realPrice, realChange, generatedAt);
   });
 
   return { recommendations: results, totalScanned };
@@ -154,10 +216,17 @@ function buildStockAnalysis(
   score: StockScore,
   totalScanned: number,
   rank: number,
+  realPrice?: number,
+  realChange?: number,
+  generatedAt?: string,
 ): StockAnalysis {
   const signal = computeStockSignal(score.total);
-  const timing = computeStockTiming(klines);
+  // 始终计算买卖时机（含收益预测），使用实时价格
+  const timing = computeStockTiming(klines, score.total, realPrice);
   const riskMetrics = calcStockRiskMetrics(klines);
+
+  // 优先使用实时价格，否则用K线最后收盘价
+  const currentPrice = realPrice ?? (klines.length > 0 ? klines[klines.length - 1].close : undefined);
 
   return {
     ...stock,
@@ -173,14 +242,20 @@ function buildStockAnalysis(
                 stock.pe < 40 ? '合理估值区间' :
                 '估值偏高，谨慎参与',
     },
-    analysis: generateStockAnalysisText(stock, score, rank, timing, klines),
+    analysis: generateStockAnalysisText(stock, score, rank, signal.signal, timing, klines, currentPrice, generatedAt),
     riskMetrics,
     sectorTags: [stock.industry, stock.subIndustry].filter(Boolean),
     peerComparison: computeStockPeerComparison(rank, totalScanned, klines),
-    currentPrice: klines.length > 0 ? klines[klines.length - 1].close : undefined,
-    priceDate: klines.length > 0 ? klines[klines.length - 1].date : undefined,
+    currentPrice: Math.round((currentPrice || 0) * 100) / 100,
+    priceDate: new Date().toISOString().slice(0, 10),
     priceHistory: klines.slice(-30).map(k => ({ date: k.date, price: k.close })),
-    ...timing,
+    buyDate: timing.buyDate,
+    sellDate: timing.sellDate,
+    stopLoss: timing.stopLoss,
+    targetReturn: timing.targetReturn,
+    // 注入实时涨跌幅和推荐时间到扩展字段
+    ...(realChange != null ? { changePct: Math.round(realChange * 100) / 100 } as any : {}),
+    ...(generatedAt ? { generatedAt } as any : {}),
   };
 }
 
@@ -210,22 +285,48 @@ interface StockTiming {
   sellDate: string;
   stopLoss: number;
   targetReturn: number;
+  reason: string;
 }
 
-function computeStockTiming(klines: StockKLine[]): StockTiming {
+function computeStockTiming(klines: StockKLine[], totalScore: number, realPrice?: number): StockTiming {
   const today = new Date();
+  const currentPrice = realPrice ?? (klines.length > 0 ? klines[klines.length - 1].close : 10);
+
+  // 基于评分和近期波动计算持有天数
+  const ret20d = calcReturnFrom(klines, 20);
+  const ret5d = calcReturnFrom(klines, 5);
+  const volatility = Math.abs(ret20d) > 0 ? Math.abs(ret20d) / Math.sqrt(20/252) : 25;
+
+  // 持有天数: 高分短持(动量强) 低分短持(风险高)
+  let holdingDays: number;
+  let reason: string;
+  if (totalScore >= 70) {
+    holdingDays = 5 + Math.floor(Math.abs(ret20d) * 0.3);
+    reason = `高评分(${totalScore}分)+强动量，短线${holdingDays}个交易日内博取超额收益`;
+  } else if (totalScore >= 55) {
+    holdingDays = 7 + Math.floor(Math.abs(ret20d) * 0.2);
+    reason = `中等评分(${totalScore}分)，持有${holdingDays}个交易日，严格止损`;
+  } else {
+    holdingDays = 3 + Math.floor(Math.abs(ret5d) * 0.5);
+    reason = `评分偏低(${totalScore}分)，若有反弹机会持${holdingDays}日快进快出，不宜恋战`;
+  }
+
   const buyDate = formatLocalDate(today);
   const sell = new Date(today);
-  sell.setDate(sell.getDate() + 14);
+  sell.setDate(sell.getDate() + holdingDays);
+  // 跳过周末
+  while (sell.getDay() === 0 || sell.getDay() === 6) sell.setDate(sell.getDate() + 1);
   const sellDate = formatLocalDate(sell);
 
-  const currentPrice = klines.length > 0 ? klines[klines.length - 1].close : 10;
-  const stopLoss = Math.round(currentPrice * 0.93 * 100) / 100; // -7%
+  // 止损：高分宽止损 低分窄止损
+  const stopLossPct = totalScore >= 70 ? 0.93 : totalScore >= 55 ? 0.95 : 0.97;
+  const stopLoss = Math.round(currentPrice * stopLossPct * 100) / 100;
 
-  const ret15d = calcReturnFrom(klines, 15);
-  const targetReturn = Math.round(Math.max(3, Math.abs(ret15d) * 0.5) * 100) / 100;
+  // 目标收益：基于近期波动率估算
+  const dailyVol = volatility / Math.sqrt(252);
+  const targetReturn = Math.round(Math.max(2, dailyVol * holdingDays * 1.5) * 100) / 100;
 
-  return { buyDate, sellDate, stopLoss, targetReturn };
+  return { buyDate, sellDate, stopLoss, targetReturn, reason };
 }
 
 function formatLocalDate(d: Date): string {
@@ -281,30 +382,37 @@ function generateStockAnalysisText(
   stock: StockInfo,
   score: StockScore,
   rank: number,
+  signalType: string,
   timing: StockTiming,
   klines: StockKLine[],
+  currentPrice?: number,
+  generatedAt?: string,
 ): string {
   const ret5d = calcReturnFrom(klines, 5);
   const ret15d = calcReturnFrom(klines, 15);
   const ret30d = calcReturnFrom(klines, 30);
-  const currentPrice = klines.length > 0 ? klines[klines.length - 1].close.toFixed(2) : '--';
+  const priceStr = currentPrice ? currentPrice.toFixed(2) : (klines.length > 0 ? klines[klines.length - 1].close.toFixed(2) : '--');
+  const timeStr = generatedAt ? new Date(generatedAt).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
 
   const parts = [
     `${stock.name}（${stock.code}）综合评分${score.total}/100，排名第${rank}。`,
-    `当前价格 ${currentPrice}，近5日 ${ret5d >= 0 ? '+' : ''}${ret5d.toFixed(2)}%，近15日 ${ret15d >= 0 ? '+' : ''}${ret15d.toFixed(2)}%，近30日 ${ret30d >= 0 ? '+' : ''}${ret30d.toFixed(2)}%。`,
-    `所属行业：${stock.industry}${stock.subIndustry ? ' / ' + stock.subIndustry : ''}，流通市值${stock.marketCap.toFixed(1)}亿。`,
-    `PE(TTM) ${stock.pe > 0 ? stock.pe.toFixed(1) : '亏损'}，PB ${stock.pb.toFixed(1)}，ROE ${stock.roe.toFixed(1)}%。`,
-    `建议买入日：${timing.buyDate}，目标清仓日：${timing.sellDate}（持有约10个交易日），止损价：${timing.stopLoss.toFixed(2)}（-7%）。`,
+    `${timeStr ? `[${timeStr}实时] ` : ''}当前价格 ¥${priceStr}，近5日 ${ret5d >= 0 ? '+' : ''}${ret5d.toFixed(2)}%，近15日 ${ret15d >= 0 ? '+' : ''}${ret15d.toFixed(2)}%，近30日 ${ret30d >= 0 ? '+' : ''}${ret30d.toFixed(2)}%。`,
+    `所属行业：${stock.industry}${stock.subIndustry ? ' / ' + stock.subIndustry : ''}，流通市值${stock.marketCap.toFixed(1)}亿。PE(TTM) ${stock.pe > 0 ? stock.pe.toFixed(1) : '亏损'}，PB ${stock.pb.toFixed(1)}，ROE ${stock.roe.toFixed(1)}%。`,
   ];
 
-  if (score.total >= 80) {
-    parts.push('短期爆发力极强，技术面与基本面共振，适合短线积极介入。');
-  } else if (score.total >= 65) {
-    parts.push('短期趋势向好，基本面支撑较强，可适度参与。');
-  } else if (score.total >= 55) {
-    parts.push('动能尚可，建议小仓位试探，严格止盈止损。');
+  // 始终输出交易时机和收益预测
+  parts.push(`建议买入日：${timing.buyDate}，目标清仓日：${timing.sellDate}，止损价：${timing.stopLoss.toFixed(2)}，预期收益：${timing.targetReturn}%。`);
+  parts.push(`时机分析：${timing.reason}。`);
+
+  // 评分解读
+  if (signalType === 'buy') {
+    parts.push(score.total >= 80
+      ? '短期爆发力极强，技术面与基本面共振，适合短线积极介入。'
+      : '短期趋势向好，基本面支撑较强，可适度参与。');
+  } else if (signalType === 'hold') {
+    parts.push('动能尚可但未达买入阈值，可小仓位试探，严格止盈止损。');
   } else {
-    parts.push('短期动能一般，观望为主。');
+    parts.push('评分偏低，当前不建议买入。若已持有建议减仓或止损，空仓者观望等待。');
   }
 
   return parts.join('');

@@ -19,6 +19,9 @@ interface StockHolding {
   todayPnl?: number;
   industry?: string;
   sellSuggestion?: string;
+  targetSellPrice?: number;
+  stopLoss?: number;
+  holdingDays?: number;
 }
 
 interface StockPortfolioData {

@@ -8,7 +8,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse } from '@allin/shared';
 import type { HoldingsDetail } from '../services/holdings.js';
-import { fetchAllFunds, getMockFunds, fetchFundDetail, fetchFundHoldings, fetchStockChanges, lookupStockName } from '../adapters/eastmoney.js';
+import { fetchAllFunds, fetchFundDetail, fetchFundHoldings, fetchStockChanges, lookupStockName } from '../adapters/eastmoney.js';
 
 const router = Router();
 
@@ -28,15 +28,7 @@ router.get('/funds/:code/holdings', async (req: Request, res: Response) => {
 
     // Step 1: 获取基金基本信息（真实 API + mock 补齐字段）
     const allFunds = await fetchAllFunds();
-    let fund = allFunds.find((f) => f.code === code);
-    if (fund) {
-      const mockFunds = getMockFunds();
-      const mockMatch = mockFunds.find((f) => f.code === code);
-      if (mockMatch) fund = { ...fund, ...mockMatch };
-    } else {
-      const mockFunds = getMockFunds();
-      fund = mockFunds.find((f) => f.code === code);
-    }
+    const fund = allFunds.find((f) => f.code === code);
 
     if (!fund) {
       const body: ApiResponse<never> = {

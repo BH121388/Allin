@@ -521,9 +521,7 @@ function scoreScale(scale: number): number {
 
 function scoreSectorMatch(fund: FundInfo): number {
   const base = SECTOR_BASE[fund.type] ?? 5;
-  // 基于基金代码的确定性扰动（-1, 0, 或 1）
-  const jitter = (hashCode(fund.code + fund.type) % 3) - 1;
-  return clamp(base + jitter, 0, 10);
+  return clamp(base, 0, 10);
 }
 
 // ============================================================
@@ -704,8 +702,7 @@ function scoreScaleForFund(fund?: FundInfo): number {
 function scoreSectorForFund(fund?: FundInfo): number {
   if (!fund) return 5;
   const base = SECTOR_BASE[fund.type] ?? 5;
-  const jitter = Math.abs(hashCode(fund.code + fund.type)) % 3 - 1;
-  return clamp(base + jitter, 0, 10);
+  return clamp(base, 0, 10);
 }
 
 function parseManagerReturnVal(raw: string): number {
@@ -828,7 +825,7 @@ export function getGrade(totalScore: number): { label: string; text: string } {
 
 async function selfTest(): Promise<void> {
   // 动态导入以避免循环依赖
-  const { getMockFunds, getMockNAV } =
+  const { fetchAllFunds, fetchFundDetail } =
     await import('../adapters/eastmoney.js');
 
   console.log('========================================');
@@ -836,8 +833,10 @@ async function selfTest(): Promise<void> {
   console.log('========================================\n');
 
   // --- 单只基金评分 ---
-  const fund = getMockFunds()[0]; // 易方达蓝筹精选混合
-  const nav = getMockNAV(fund.code);
+  const funds = await fetchAllFunds();
+  const fund = funds[0];
+  const detail = await fetchFundDetail(fund.code);
+  const nav = detail?.navHistory || [];
 
   console.log(`--- 单只基金: ${fund.code} ${fund.name} ---`);
   console.log(`  类型: ${fund.type}`);
@@ -871,12 +870,13 @@ async function selfTest(): Promise<void> {
 
   console.log('');
 
-  // --- 批量评分（全部 10 只 mock 基金）---
-  console.log('--- 批量评分 (全部 mock 基金) ---');
-  const allFunds = getMockFunds();
+  // --- 批量评分（真实基金）---
+  console.log('--- 批量评分 ---');
+  const allFunds = (await fetchAllFunds()).slice(0, 10);
   const navMap = new Map<string, typeof nav>();
   for (const f of allFunds) {
-    navMap.set(f.code, getMockNAV(f.code));
+    const d = await fetchFundDetail(f.code);
+    navMap.set(f.code, d?.navHistory || []);
   }
 
   const allScores = scoreAllFunds(allFunds, navMap);

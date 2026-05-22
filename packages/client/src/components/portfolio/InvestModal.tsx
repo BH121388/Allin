@@ -166,7 +166,7 @@ export default function InvestModal({ code, name, open, onClose }: InvestModalPr
             </div>
             <div className="flex items-center justify-between border-t border-slate-200 pt-3">
               <span className="text-sm font-medium text-slate-700">本次投入</span>
-              <span className="text-xl font-bold text-emerald-600">
+              <span className="text-xl font-bold text-red-600">
                 ¥{result.actualAmount.toLocaleString()}
               </span>
             </div>

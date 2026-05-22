@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, FundScore, SignalResult, FundInfo } from '@allin/shared';
 import { getDb } from '../db/index.js';
-import { getMockNAV, getMockFunds, fetchFundDetail, fetchAllFunds, estimateIntradayNAV } from '../adapters/eastmoney.js';
+import { fetchFundDetail, fetchAllFunds, estimateIntradayNAV } from '../adapters/eastmoney.js';
 import { scoreAllFundsUnified } from '../services/scoring.js';
 import { calculateInvestAmount } from '../services/invest.js';
 import { evaluateTakeProfit, getTakeProfitRule } from '../services/takeProfit.js';
@@ -272,20 +272,14 @@ router.get('/portfolio/:code/takeProfit', async (req: Request, res: Response) =>
       return;
     }
 
-    // 计算当前收益（使用真实净值，降级为 mock）
+    // 计算当前收益（使用真实API获取净值）
     let currentNav = row.cost_nav;
     try {
       const detail = await fetchFundDetail(code);
       if (detail && detail.navHistory.length > 0) {
         currentNav = detail.navHistory[detail.navHistory.length - 1].nav;
       }
-    } catch {
-      // fall back to mock
-    }
-    if (currentNav === row.cost_nav) {
-      const navData = getMockNAV(code);
-      currentNav = navData.length > 0 ? navData[navData.length - 1].nav : row.cost_nav;
-    }
+    } catch { /* 净值获取失败，沿用成本净值 */ }
     const currentValue = row.shares * currentNav;
     const pnl = currentValue - row.amount;
     const pnlPercent = row.amount > 0 ? (pnl / row.amount) * 100 : 0;
@@ -295,10 +289,8 @@ router.get('/portfolio/:code/takeProfit', async (req: Request, res: Response) =>
     const now = new Date();
     const holdingDays = Math.floor((now.getTime() - addedDate.getTime()) / (1000 * 60 * 60 * 24));
 
-    // 查找基金类型
-    const mockFunds = getMockFunds();
-    const fundInfo = mockFunds.find((f) => f.code === code);
-    const fundType = fundInfo?.type ?? '';
+    // 基金类型默认为偏股混合型（最常见类型）
+    const fundType = '偏股混合型';
 
     const rule = getTakeProfitRule(fundType);
     const evaluation = evaluateTakeProfit(fundType, pnlPercent, holdingDays);
@@ -377,17 +369,11 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     const db = getDb();
     const rows = db.prepare('SELECT * FROM portfolio ORDER BY added_at DESC').all() as PortfolioRow[];
 
-    // 构建 FundInfo 查找表（mock + 真实基金数据）
+    // 构建 FundInfo 查找表（真实基金数据）
     const allRealFunds = await fetchAllFunds();
     const fundMap = new Map<string, FundInfo>();
-    for (const f of getMockFunds()) fundMap.set(f.code, f);
     for (const f of allRealFunds) {
-      if (!fundMap.has(f.code)) fundMap.set(f.code, f);
-      else {
-        // 合并：mock 补充 type/manager 等真实数据缺失的字段
-        const existing = fundMap.get(f.code)!;
-        fundMap.set(f.code, { ...f, ...existing });
-      }
+      fundMap.set(f.code, f);
     }
 
     const holdings: PortfolioHolding[] = [];
@@ -398,15 +384,13 @@ router.get('/portfolio', async (_req: Request, res: Response) => {
     const navDataByCode = new Map<string, import('../adapters/eastmoney.js').NAVEntry[]>();
 
     for (const row of rows) {
-      let navData = getMockNAV(row.code);
+      let navData: any[] = [];
       try {
         const detail = await fetchFundDetail(row.code);
         if (detail && detail.navHistory.length > 0) {
           navData = detail.navHistory;
         }
-      } catch {
-        // fall back to mock
-      }
+      } catch { /* API失败则用空数组 */ }
       navDataByCode.set(row.code, navData);
 
       // 优先从 fundMap 获取完整 FundInfo，缺失时用数据库记录补底

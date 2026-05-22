@@ -9,7 +9,7 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, StockInfo, StockScore, StockSignalResult } from '@allin/shared';
 import { getDb } from '../db/index.js';
-import { getMockStocks, getMockKLine, fetchAllStocks, fetchStockKLine, fetchSingleStockQuote } from '../adapters/stock.js';
+import { getMockStocks, getMockKLine, fetchAllStocks, fetchStockKLine, fetchStockByCode, fetchSingleStockQuote } from '../adapters/stock.js';
 import { scoreStock } from '../services/stock-scoring.js';
 import { evaluateStockTakeProfit } from '../services/stock-takeprofit.js';
 
@@ -47,6 +47,9 @@ interface StockHolding {
   todayPnl?: number;
   industry?: string;
   sellSuggestion?: string;
+  targetSellPrice?: number;
+  stopLoss?: number;
+  holdingDays?: number;
 }
 
 // ============================================================
@@ -67,6 +70,28 @@ function getStockSignal(totalScore: number): StockSignalResult {
 }
 
 // ============================================================
+// 评分DB读写（与搜索/推荐共用 stock_scores 表）
+// ============================================================
+function readScoreFromDB(code: string): StockScore | null {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM stock_scores WHERE stock_code = ? AND date = ? ORDER BY date DESC LIMIT 1')
+      .get(code, new Date().toISOString().slice(0, 10)) as Record<string, number> | undefined;
+    if (row) {
+      return { momentum: row.momentum, riskControl: row.risk_control, riskAdjusted: row.risk_adjusted, companyQuality: row.company_quality, valuation: row.valuation, sectorMatch: row.sector_match, total: row.total };
+    }
+  } catch { /* 表可能不存在 */ }
+  return null;
+}
+function writeScoreToDB(code: string, score: StockScore): void {
+  try {
+    const db = getDb();
+    db.prepare(`INSERT OR REPLACE INTO stock_scores (stock_code, date, momentum, risk_control, risk_adjusted, company_quality, valuation, sector_match, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(code, new Date().toISOString().slice(0, 10), score.momentum, score.riskControl, score.riskAdjusted, score.companyQuality, score.valuation, score.sectorMatch, score.total);
+  } catch { /* skip */ }
+}
+
+// ============================================================
 // POST /api/stock-portfolio/add — 添加股票持仓
 // ============================================================
 
@@ -84,6 +109,9 @@ router.post('/stock-portfolio/add', (req: Request, res: Response) => {
       return;
     }
 
+    // 按实际成交金额存储（股数取整后，实际花费 = 股数 × 单价）
+    const actualAmount = shares * costPrice;
+
     const db = getDb();
 
     // 确保股票基础信息写入 stocks 表
@@ -98,8 +126,8 @@ router.post('/stock-portfolio/add', (req: Request, res: Response) => {
     ).get(code) as { id: number; amount: number; shares: number } | undefined;
 
     if (existing) {
-      // 追加仓位
-      const newAmount = existing.amount + amount;
+      // 追加仓位（使用实际成交金额）
+      const newAmount = existing.amount + actualAmount;
       const newShares = existing.shares + shares;
       const newCostPrice = newAmount / newShares;
 
@@ -115,11 +143,11 @@ router.post('/stock-portfolio/add', (req: Request, res: Response) => {
     } else {
       const result = db.prepare(
         'INSERT INTO stock_portfolio (code, name, amount, cost_price, shares) VALUES (?, ?, ?, ?, ?)',
-      ).run(code, name, amount, costPrice, shares);
+      ).run(code, name, actualAmount, costPrice, shares);
 
       res.json({
         success: true,
-        data: { holding: { id: Number(result.lastInsertRowid), code, name, amount, costPrice, shares } },
+        data: { holding: { id: Number(result.lastInsertRowid), code, name, amount: actualAmount, costPrice, shares } },
         timestamp: new Date().toISOString(),
       } as ApiResponse<{ holding: { id: number; code: string; name: string; amount: number; costPrice: number; shares: number } }>);
     }
@@ -179,13 +207,32 @@ router.get('/stock-portfolio', async (_req: Request, res: Response) => {
         stock = getMockStocks().find(s => s.code === row.code);
       }
 
+      // 补充腾讯API基本面（与推荐/搜索统一）
+      if (stock && (!stock.pe || stock.marketCap === 0)) {
+        try {
+          const enriched = await fetchStockByCode(row.code);
+          if (enriched) {
+            stock.pe = enriched.pe || stock.pe;
+            stock.pb = enriched.pb || stock.pb;
+            stock.roe = enriched.roe || stock.roe;
+            stock.marketCap = enriched.marketCap || stock.marketCap;
+            stock.totalCap = enriched.totalCap || stock.totalCap;
+          }
+        } catch { /* skip */ }
+      }
+
       // K线数据
       const klineResult = klineResults[i];
-      let klines = (klineResult.status === 'fulfilled' && klineResult.value.length >= 5)
+      const klines = (klineResult.status === 'fulfilled' && klineResult.value.length >= 5)
         ? klineResult.value
         : getMockKLine(row.code);
 
-      const score = stock ? scoreStock(stock, klines) : { momentum: 0, riskControl: 0, riskAdjusted: 0, companyQuality: 0, valuation: 0, sectorMatch: 0, total: 0 };
+      // 评分：优先读数据库（与推荐/搜索统一），无记录或非今天才重算
+      let score = readScoreFromDB(row.code);
+      if (!score) {
+        score = stock ? scoreStock(stock, klines) : { momentum: 0, riskControl: 0, riskAdjusted: 0, companyQuality: 0, valuation: 0, sectorMatch: 0, total: 0 };
+        writeScoreToDB(row.code, score);
+      }
 
       // 实时价格
       const quote = quotes.get(row.code);
@@ -217,25 +264,32 @@ router.get('/stock-portfolio', async (_req: Request, res: Response) => {
         highestPrice: Math.max(currentPrice, row.cost_price * 1.1),
       });
 
+      // 计算持仓天数
+      const addedDate = new Date(row.added_at);
+      const holdingDays = Math.floor((Date.now() - addedDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // 目标卖价（成本+15%）
+      const targetSellPrice = Math.round(row.cost_price * 1.15 * 100) / 100;
+      // 止损价（基于当前价-7%，不能高于目标卖价）
+      const rawStop = Math.round(currentPrice * 0.93 * 100) / 100;
+      const stopLoss = Math.min(rawStop, targetSellPrice * 0.95);
+
       let sellSuggestion: string;
       if (tpEval.shouldAct) {
         sellSuggestion = tpEval.reason;
-        if (tpEval.stopPrice) sellSuggestion += `（止损价：${tpEval.stopPrice}）`;
+        if (tpEval.stopPrice) sellSuggestion += ` 止损 ¥${tpEval.stopPrice}`;
+      } else if (pnlPercent >= 15) {
+        sellSuggestion = `已达标+${pnlPercent.toFixed(1)}%，建议分批卖出，目标卖价 ¥${targetSellPrice}`;
+      } else if (pnlPercent >= 8) {
+        sellSuggestion = `收益+${pnlPercent.toFixed(1)}%，接近目标，可先卖1/3（¥${targetSellPrice}），余下设移动止盈`;
+      } else if (pnlPercent >= 3) {
+        sellSuggestion = `小幅盈利+${pnlPercent.toFixed(1)}%，继续持有，目标卖价 ¥${targetSellPrice}，止损 ¥${stopLoss}`;
+      } else if (pnlPercent <= -7) {
+        sellSuggestion = `触及止损线，建议清仓。止损价 ¥${stopLoss}，当前亏损${Math.abs(pnlPercent).toFixed(1)}%`;
+      } else if (pnlPercent <= -3) {
+        sellSuggestion = `小幅亏损${Math.abs(pnlPercent).toFixed(1)}%，关注止损价 ¥${stopLoss}，跌破即卖`;
       } else {
-        const addedDate = new Date(row.added_at);
-        if (pnlPercent >= 10) {
-          sellSuggestion = `收益已达+${pnlPercent.toFixed(1)}%，建议分批止盈`;
-        } else if (pnlPercent >= 5) {
-          sellSuggestion = `收益+${pnlPercent.toFixed(1)}%，可设移动止盈`;
-        } else if (pnlPercent <= -10) {
-          sellSuggestion = '亏损超10%，建议严格止损';
-        } else if (pnlPercent <= -5) {
-          sellSuggestion = `亏损${Math.abs(pnlPercent).toFixed(1)}%，关注止损线`;
-        } else {
-          const sellDate = new Date(addedDate);
-          sellDate.setDate(sellDate.getDate() + 14);
-          sellSuggestion = `目标清仓日 ${sellDate.toISOString().slice(0, 10)}`;
-        }
+        sellSuggestion = `成本附近，持有观察。目标卖价 ¥${targetSellPrice}，止损 ¥${stopLoss}`;
       }
 
       holdings.push({
@@ -256,6 +310,9 @@ router.get('/stock-portfolio', async (_req: Request, res: Response) => {
         todayPnl: Math.round(todayPnl * 100) / 100,
         industry: stock?.industry || '',
         sellSuggestion,
+        targetSellPrice,
+        stopLoss,
+        holdingDays,
       });
 
       totalValue += currentValue;

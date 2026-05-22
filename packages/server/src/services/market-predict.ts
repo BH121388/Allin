@@ -54,7 +54,7 @@ let cachedAt = 0;
 const CACHE_TTL_MS = 60_000; // 60秒
 
 // ============================================================
-// 主入口
+// 主入口：明日预测
 // ============================================================
 
 export async function predictMarket(forceRefresh = false): Promise<MarketPrediction> {
@@ -65,39 +65,70 @@ export async function predictMarket(forceRefresh = false): Promise<MarketPredict
 
   console.log('[market-predict] 正在分析明日大盘...');
 
-  // 并行获取所有数据
-  const [overview] = await Promise.all([
-    getStockMarketOverview(true),
-  ]);
+  const overview = await getStockMarketOverview(true);
 
-  // 1. 恐贪指数信号 (0-30分)
+  const result = buildPrediction(overview, 'tomorrow');
+
+  cachedPrediction = result;
+  cachedAt = now;
+
+  savePredictionToDB(result);
+  autoCloseYesterdayPrediction(overview);
+
+  console.log(`[market-predict] 明日预测: ${result.buySignal ? '建议买入' : '不建议买入'} (${result.totalScore}/100)`);
+  return result;
+}
+
+// ============================================================
+// 今日实时分析（新增）
+// ============================================================
+
+let cachedTodayAnalysis: MarketPrediction | null = null;
+let cachedTodayAt = 0;
+const TODAY_CACHE_TTL_MS = 30_000; // 30秒（今日分析需要更实时）
+
+export async function predictToday(forceRefresh = false): Promise<MarketPrediction> {
+  const now = Date.now();
+  if (!forceRefresh && cachedTodayAnalysis && now - cachedTodayAt < TODAY_CACHE_TTL_MS) {
+    return cachedTodayAnalysis;
+  }
+
+  console.log('[market-predict] 正在实时分析今日市场...');
+
+  const overview = await getStockMarketOverview(true);
+
+  const result = buildPrediction(overview, 'today');
+
+  cachedTodayAnalysis = result;
+  cachedTodayAt = now;
+
+  console.log(`[market-predict] 今日分析: ${result.buySignal ? '建议买入' : '不建议买入'} (${result.totalScore}/100)`);
+  return result;
+}
+
+// ============================================================
+// 通用预测构建
+// ============================================================
+
+function buildPrediction(
+  overview: Awaited<ReturnType<typeof getStockMarketOverview>>,
+  mode: 'today' | 'tomorrow',
+): MarketPrediction {
   const sentiment = computeSentiment(overview);
-
-  // 2. 指数技术面 (0-25分)
   const technical = computeTechnical(overview);
-
-  // 3. 市场宽度 (0-20分)
   const breadth = computeBreadth(overview);
-
-  // 4. 板块轮动 (0-15分)
   const sectorFlow = computeSectorFlow(overview);
-
-  // 5. 日历因子 (0-10分)
-  const calendar = computeCalendar();
+  const calendar = mode === 'tomorrow' ? computeCalendar() : computeTodayCalendar();
 
   const totalScore = sentiment.score + technical.score + breadth.score + sectorFlow.score + calendar.score;
   const buySignal = totalScore >= 60;
-
-  // 预测波动区间
   const predictedRange = computePredictedRange(overview, totalScore);
-
-  // 置信度
   const confidence = computeConfidence(sentiment, technical, breadth);
+  const { summary, riskNote } = mode === 'tomorrow'
+    ? generateSummary(buySignal, totalScore, sentiment, technical, breadth, sectorFlow)
+    : generateTodaySummary(buySignal, totalScore, sentiment, technical, breadth, sectorFlow);
 
-  // 生成总结
-  const { summary, riskNote } = generateSummary(buySignal, totalScore, sentiment, technical, breadth, sectorFlow);
-
-  const result: MarketPrediction = {
+  return {
     buySignal,
     totalScore,
     dimensions: { sentiment, technical, breadth, sectorFlow, calendar },
@@ -107,16 +138,6 @@ export async function predictMarket(forceRefresh = false): Promise<MarketPredict
     riskNote,
     generatedAt: new Date().toISOString(),
   };
-
-  cachedPrediction = result;
-  cachedAt = now;
-
-  // 持久化预测记录 + 自动复盘昨日预测
-  savePredictionToDB(result);
-  autoCloseYesterdayPrediction(overview);
-
-  console.log(`[market-predict] 预测完成: ${buySignal ? '建议买入' : '不建议买入'} (${totalScore}/100)`);
-  return result;
 }
 
 // ============================================================
@@ -284,6 +305,32 @@ function computeCalendar(): MarketPrediction['dimensions']['calendar'] {
   return { score: Math.max(0, score), max: 10, label: '日历因子', detail };
 }
 
+function computeTodayCalendar(): MarketPrediction['dimensions']['calendar'] {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+
+  let score = 10;
+  let detail = '当前为交易日盘中，正常交易时段';
+
+  // 盘中时段判断
+  if (hour < 9 || (hour === 9 && minute < 30)) {
+    score = 9; detail = '盘前时段，关注集合竞价和早盘消息面';
+  } else if (hour >= 9 && hour < 11) {
+    score = 10; detail = '早盘活跃时段，成交量大，方向选择关键期';
+  } else if (hour >= 11 && hour < 13) {
+    score = 8; detail = '午间休市/午后开盘，注意午后资金回流情况';
+  } else if (hour >= 13 && hour < 14) {
+    score = 10; detail = '午后交易时段，趋势延续或反转观察点';
+  } else if (hour >= 14 && hour < 15) {
+    score = 9; detail = '尾盘时段，关注收盘价和集合竞价';
+  } else if (hour >= 15) {
+    score = 7; detail = '已收盘，今日交易结束，关注收盘点位和盘后消息';
+  }
+
+  return { score, max: 10, label: '日历因子', detail };
+}
+
 // ============================================================
 // 波动区间预测
 // ============================================================
@@ -317,13 +364,21 @@ function computeConfidence(
   technical: MarketPrediction['dimensions']['technical'],
   breadth: MarketPrediction['dimensions']['breadth'],
 ): number {
-  // 各维度分数越高，置信度越高
+  // 各维度分数越高，置信度越高。但加入信号分歧惩罚
   const totalMax = 30 + 25 + 20;
   const totalActual = sentiment.score + technical.score + breadth.score;
   const rawConfidence = totalActual / totalMax;
 
-  // 映射到 50-95% 区间
-  return Math.round((50 + rawConfidence * 45) * 10) / 10;
+  // 如果三个维度方向不一致（有高有低），惩罚置信度
+  const scores = [sentiment.score/30, technical.score/25, breadth.score/20];
+  const avgScore = scores.reduce((a,b)=>a+b,0) / 3;
+  const variance = scores.reduce((s, v) => s + (v - avgScore) ** 2, 0) / 3;
+
+  // 方差越大说明信号越矛盾，惩罚5-15%
+  const penalty = Math.min(15, variance * 40);
+
+  // 映射到 50-95% 区间，减去分歧惩罚
+  return Math.round((50 + rawConfidence * 45 - penalty) * 10) / 10;
 }
 
 // ============================================================
@@ -355,6 +410,39 @@ function generateSummary(
     riskNote = '下跌趋势中不要接飞刀，等恐慌释放后再考虑抄底。';
   } else {
     summary = `坚决不要买入！综合评分${totalScore}/100，市场处于恐慌状态，全线下跌。现金为王，等待市场企稳信号出现后再做决策。`;
+    riskNote = '极端行情下不要逆势而为，留得青山在不怕没柴烧。';
+  }
+
+  return { summary, riskNote };
+}
+
+function generateTodaySummary(
+  buySignal: boolean,
+  totalScore: number,
+  sentiment: MarketPrediction['dimensions']['sentiment'],
+  technical: MarketPrediction['dimensions']['technical'],
+  breadth: MarketPrediction['dimensions']['breadth'],
+  sectorFlow: MarketPrediction['dimensions']['sectorFlow'],
+): { summary: string; riskNote: string } {
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  let summary: string;
+  let riskNote: string;
+
+  if (buySignal && totalScore >= 75) {
+    summary = `【${timeStr} 实时分析】建议今日买入。综合评分${totalScore}/100，市场情绪积极，技术面强势，赚钱效应显著。可适度加仓参与。`;
+    riskNote = '注意连续上涨后的短期回调风险，设置3%止损。';
+  } else if (buySignal) {
+    summary = `【${timeStr} 实时分析】可考虑买入。综合评分${totalScore}/100，市场整体偏强。建议控制仓位在50%以内，选择领涨板块介入。`;
+    riskNote = '关注成交额是否持续放大，若缩量需警惕冲高回落。';
+  } else if (totalScore >= 45) {
+    summary = `【${timeStr} 实时分析】不建议今日买入。综合评分${totalScore}/100，市场方向不明或偏弱，赚钱效应不足。观望为主，等待更明确的入场信号。`;
+    riskNote = '当前震荡区间内不宜追涨杀跌，留着现金等待机会。';
+  } else if (totalScore >= 30) {
+    summary = `【${timeStr} 实时分析】不建议今日买入。综合评分${totalScore}/100，市场偏弱，亏钱效应明显。建议减仓或空仓，保护本金安全。`;
+    riskNote = '下跌趋势中不要接飞刀，等恐慌释放后再考虑抄底。';
+  } else {
+    summary = `【${timeStr} 实时分析】坚决不要买入！综合评分${totalScore}/100，市场处于恐慌状态。现金为王，等待市场企稳信号。`;
     riskNote = '极端行情下不要逆势而为，留得青山在不怕没柴烧。';
   }
 

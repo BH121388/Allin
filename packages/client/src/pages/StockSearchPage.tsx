@@ -85,9 +85,12 @@ export default function StockSearchPage() {
 }
 
 function StockReport({ stock }: { stock: StockAnalysis }) {
-  const score = stock.score;
+  // 安全访问所有可能为空的字段
+  const score = stock.score || { total: 0, momentum: 0, riskControl: 0, riskAdjusted: 0, companyQuality: 0, valuation: 0, sectorMatch: 0 };
   const grade = getStockGradeText(score.total);
-  const signalConfig = getSignalConfig(stock.signal.signal);
+  const signalConfig = getSignalConfig(stock.signal?.signal || 'hold');
+  const safeNum = (v: number | null | undefined, decimals = 1) =>
+    v != null && !isNaN(v) ? v.toFixed(decimals) : '--';
 
   return (
     <div className="space-y-4">
@@ -95,8 +98,8 @@ function StockReport({ stock }: { stock: StockAnalysis }) {
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <div className="flex items-start justify-between mb-3">
           <div>
-            <h2 className="text-lg font-bold text-slate-800">{stock.name}</h2>
-            <p className="text-sm text-slate-500">{stock.code} · {stock.exchange === 'SH' ? '沪市' : stock.exchange === 'SZ' ? '深市' : stock.exchange}</p>
+            <h2 className="text-lg font-bold text-slate-800">{stock.name || stock.code}</h2>
+            <p className="text-sm text-slate-500">{stock.code} · {stock.exchange === 'SH' ? '沪市' : stock.exchange === 'SZ' ? '深市' : stock.exchange || '--'}</p>
           </div>
           <div className="text-right">
             <span className="text-3xl font-bold text-slate-800">{score.total}</span>
@@ -106,9 +109,9 @@ function StockReport({ stock }: { stock: StockAnalysis }) {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <InfoItem label="行业" value={`${stock.industry}${stock.subIndustry ? ' / ' + stock.subIndustry : ''}`} />
-          <InfoItem label="流通市值" value={`${stock.marketCap.toFixed(1)}亿`} />
-          <InfoItem label="总市值" value={`${stock.totalCap.toFixed(1)}亿`} />
+          <InfoItem label="行业" value={`${stock.industry || '--'}${stock.subIndustry ? ' / ' + stock.subIndustry : ''}`} />
+          <InfoItem label="流通市值" value={`${safeNum(stock.marketCap)}亿`} />
+          <InfoItem label="总市值" value={`${safeNum(stock.totalCap)}亿`} />
           <InfoItem label="上市日期" value={stock.inception || '--'} />
         </div>
       </div>
@@ -170,15 +173,20 @@ function StockReport({ stock }: { stock: StockAnalysis }) {
         </div>
       )}
 
-      {/* Price & timing */}
+      {/* Price & timing — 始终显示买卖时机分析 */}
       <div className="bg-white border border-slate-200 rounded-lg p-4">
-        <h3 className="font-semibold text-slate-800 mb-3">交易时机</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <h3 className="font-semibold text-slate-800 mb-3">交易时机分析</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
           <InfoItem label="当前价格" value={stock.currentPrice?.toFixed(2) ?? '--'} />
-          <InfoItem label="建议买入日" value={stock.buyDate ?? '--'} />
-          <InfoItem label="目标清仓日" value={stock.sellDate ?? '--'} />
+          <InfoItem label={stock.signal.signal === 'buy' ? '建议买入日' : '潜在入场日'} value={stock.buyDate ?? '--'} />
           <InfoItem label="止损价" value={stock.stopLoss?.toFixed(2) ?? '--'} />
+          <InfoItem label="预期收益" value={stock.targetReturn != null ? `${stock.targetReturn}%` : '--'} />
         </div>
+        {(stock as any).timingReason && (
+          <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 rounded-lg p-3">
+            {(stock as any).timingReason}
+          </p>
+        )}
       </div>
 
       {/* Technical indicators */}
@@ -253,25 +261,27 @@ function StockReport({ stock }: { stock: StockAnalysis }) {
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <h3 className="font-semibold text-slate-800 mb-3">基本面</h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <InfoItem label="PE(TTM)" value={stock.pe > 0 ? stock.pe.toFixed(1) : '亏损'} />
-          <InfoItem label="PB" value={stock.pb.toFixed(1)} />
-          <InfoItem label="ROE" value={`${stock.roe.toFixed(1)}%`} />
-          <InfoItem label="营收增速" value={`${stock.revenueGrowth.toFixed(1)}%`} />
-          <InfoItem label="净利润增速" value={`${stock.profitGrowth.toFixed(1)}%`} />
-          <InfoItem label="净利率" value={`${stock.netProfitMargin.toFixed(1)}%`} />
+          <InfoItem label="PE(TTM)" value={stock.pe > 0 ? safeNum(stock.pe) : '亏损'} />
+          <InfoItem label="PB" value={safeNum(stock.pb)} />
+          <InfoItem label="ROE" value={`${safeNum(stock.roe)}%`} />
+          <InfoItem label="营收增速" value={`${safeNum(stock.revenueGrowth)}%`} />
+          <InfoItem label="净利润增速" value={`${safeNum(stock.profitGrowth)}%`} />
+          <InfoItem label="净利率" value={`${safeNum(stock.netProfitMargin)}%`} />
         </div>
       </div>
 
       {/* Peer comparison */}
+      {stock.peerComparison && (
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <h3 className="font-semibold text-slate-800 mb-3">同业比较</h3>
         <p className="text-sm text-slate-600">
           在约 {stock.peerComparison.totalPeers} 只同行股票中，
           排名约前 {stock.peerComparison.rankPercentile}%。
-          近3月收益 {stock.peerComparison.stockReturn.toFixed(2)}%，
-          行业均值约 {stock.peerComparison.industryAvgReturn.toFixed(2)}%。
+          近3月收益 {safeNum(stock.peerComparison.stockReturn, 2)}%，
+          行业均值约 {safeNum(stock.peerComparison.industryAvgReturn, 2)}%。
         </p>
       </div>
+      )}
 
       {/* Analysis text */}
       <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -330,7 +340,7 @@ function getStockGradeText(total: number): string {
 
 function getSignalConfig(signal: string) {
   switch (signal) {
-    case 'buy': return { label: '买入', bg: 'bg-green-100', text: 'text-green-700', icon: <TrendingUp className="w-3.5 h-3.5" /> };
+    case 'buy': return { label: '买入', bg: 'bg-red-100', text: 'text-red-700', icon: <TrendingUp className="w-3.5 h-3.5" /> };
     case 'hold': return { label: '持有', bg: 'bg-blue-100', text: 'text-blue-700', icon: <TrendingUp className="w-3.5 h-3.5" /> };
     case 'reduce': return { label: '减持', bg: 'bg-amber-100', text: 'text-amber-700', icon: <TrendingDown className="w-3.5 h-3.5" /> };
     case 'sell': return { label: '卖出', bg: 'bg-red-100', text: 'text-red-700', icon: <AlertTriangle className="w-3.5 h-3.5" /> };

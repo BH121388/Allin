@@ -29,7 +29,7 @@ function ScoreBar({ value, max, color }: { value: number; max: number; color: st
 }
 
 function getScoreColor(total: number): string {
-  if (total >= 75) return 'text-emerald-600';
+  if (total >= 75) return 'text-red-600';
   if (total >= 60) return 'text-blue-600';
   if (total >= 45) return 'text-amber-600';
   return 'text-slate-400';
@@ -161,7 +161,7 @@ export default function ScreenerPage() {
                     <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1.5 text-[10px] sm:text-xs text-slate-500 flex-wrap">
                       <span>净值 <span className="font-mono text-slate-700">{fund.nav?.toFixed(4)}</span></span>
                       <span className="hidden sm:inline">{fund.navDate}</span>
-                      <span className={cn('font-mono font-medium', fund.ret1y >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                      <span className={cn('font-mono font-medium', fund.ret1y >= 0 ? 'text-red-600' : 'text-green-600')}>
                         1Y {fund.ret1y >= 0 ? '+' : ''}{fund.ret1y.toFixed(1)}%
                       </span>
                       <span className="text-slate-400">DD {fund.maxDrawdown.toFixed(1)}%</span>

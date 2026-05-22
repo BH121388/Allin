@@ -1,16 +1,17 @@
 import { Router, Request, Response } from 'express';
 import type { ApiResponse, MarketOverview } from '@allin/shared';
-import { generateMarketOverview } from '../services/market.js';
+import { generateMarketOverviewAsync } from '../services/market.js';
 
 const router = Router();
 
 /**
  * GET /api/market/overview
  *   返回今日市场概览：板块排名、新闻事件、机会与风险。
+ *   数据来源：东方财富行业板块API（实时）+ MCP缓存。
  */
-router.get('/market/overview', (_req: Request, res: Response) => {
+router.get('/market/overview', async (_req: Request, res: Response) => {
   try {
-    const data = generateMarketOverview();
+    const data = await generateMarketOverviewAsync();
 
     const body: ApiResponse<MarketOverview> = {
       success: true,

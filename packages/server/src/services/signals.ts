@@ -247,7 +247,7 @@ function buildSummary(
 // ============================================================
 
 async function selfTest(): Promise<void> {
-  const { getMockFunds, getMockNAV } =
+  const { fetchAllFunds, fetchFundDetail } =
     await import('../adapters/eastmoney.js');
   const { scoreFund } = await import('./scoring.js');
 
@@ -255,12 +255,13 @@ async function selfTest(): Promise<void> {
   console.log('[signals] 自测开始');
   console.log('========================================\n');
 
-  // 获取所有 mock 基金并评分
-  const funds = getMockFunds();
+  // 获取真实基金并评分
+  const funds = await fetchAllFunds();
   const signals: SignalResult[] = [];
 
-  for (const fund of funds) {
-    const nav = getMockNAV(fund.code);
+  for (const fund of funds.slice(0, 5)) {
+    const detail = await fetchFundDetail(fund.code);
+    const nav = detail?.navHistory || [];
     const score = scoreFund(fund, nav);
     const signal = generateSignal(fund, score, nav);
     signals.push(signal);

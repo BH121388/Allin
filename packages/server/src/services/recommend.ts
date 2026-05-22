@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { FundInfo, FundAnalysis, FundScore, SignalResult, RiskMetrics, PeerComparison } from '@allin/shared';
-import { getMockFunds, getMockNAV, fetchFundDetail, fetchAllFunds, estimateIntradayNAV, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
+import { fetchFundDetail, fetchAllFunds, estimateIntradayNAV, type NAVEntry, lookupStockName } from '../adapters/eastmoney.js';
 import { scoreAllFundsUnified, getGrade } from './scoring.js';
 import { getDb } from '../db/index.js';
 
@@ -80,39 +80,23 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
 
   console.log(`[recommend] Step 2: 混合型+热门赛道 → ${mixedFunds.length} 只`);
 
-  // 回退：如果筛选结果太少，用 mock 基金池补充
+  // 使用真实基金列表（无mock补充）
   let candidates: FundInfo[];
-  let totalScanned: number;
   if (mixedFunds.length < 10) {
-    console.log('[recommend] 真实基金不足，补充 mock 基金池');
-    const mocks = getMockFunds().filter(f => f.type.includes('混合'));
-    candidates = [...mixedFunds, ...mocks];
-    totalScanned = candidates.length;
+    console.log('[recommend] 筛选后基金较少，扩大范围');
+    const allMixed = allFunds.filter(f => {
+      const type = (f.type || '').toLowerCase();
+      return type.includes('混合') || type.includes('灵活配置');
+    });
+    candidates = allMixed.length > 0 ? allMixed : mixedFunds;
   } else {
     candidates = mixedFunds;
-    totalScanned = mixedFunds.length;
   }
+  const totalScanned = candidates.length;
 
-  // 用 mock 补全真实基金的缺失字段（manager/tenure/scale 等），与搜索/持仓一致
-  const mockMap = new Map(getMockFunds().map(f => [f.code, f]));
-  for (const c of candidates) {
-    const mock = mockMap.get(c.code);
-    if (mock) Object.assign(c, mock);
-  }
-
-  // 候选池：mock 匹配优先 + 确定性打散（按日期种子，当天不变）
+  // 候选池限流（取前100）
   if (candidates.length > 100) {
-    const withMock = candidates.filter(c => mockMap.has(c.code));
-    const withoutMock = candidates.filter(c => !mockMap.has(c.code));
-    // 用今日日期作为种子，当天推荐固定
-    const today = new Date();
-    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-    const rng = createSeededRNG(seed);
-    for (let i = withoutMock.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [withoutMock[i], withoutMock[j]] = [withoutMock[j], withoutMock[i]];
-    }
-    candidates = [...withMock, ...withoutMock].slice(0, 100);
+    candidates = candidates.slice(0, 100);
   }
 
   console.log(`[recommend] 候选基金池: ${candidates.length} 只`);
@@ -130,7 +114,7 @@ async function runPipeline(): Promise<{ recommendations: FundAnalysis[]; totalSc
             return { code: f.code, nav: detail.navHistory, name: detail.name };
           }
         } catch { /* fall through */ }
-        return { code: f.code, nav: getMockNAV(f.code), name: f.name };
+        return { code: f.code, nav: [], name: f.name };
       }),
     );
     for (const r of results) {

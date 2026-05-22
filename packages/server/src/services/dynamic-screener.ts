@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { FundInfo } from '@allin/shared';
-import { fetchAllFunds, fetchFundDetail, getMockFunds, getMockNAV, type NAVEntry } from '../adapters/eastmoney.js';
+import { fetchAllFunds, fetchFundDetail, type NAVEntry } from '../adapters/eastmoney.js';
 
 // ============================================================
 // 类型定义
@@ -383,12 +383,8 @@ export async function runScreener(period: ScreenerPeriod = '1y'): Promise<Screen
   });
   console.log(`[screener] 类型预筛选: ${allFunds.length} → ${filtered.length} 只（仅股票/混合型）`);
 
-  // Step 3: 合并 mock 字段补全
-  const mockMap = new Map(getMockFunds().map(f => [f.code, f]));
-  const fundsWithMock = filtered.map(f => {
-    const mock = mockMap.get(f.code);
-    return mock ? { ...f, ...mock } : f;
-  });
+  // Step 3: 使用真实数据（无需mock补全）
+  const fundsWithMock = filtered;
 
   // Step 4: 全量批量获取净值（并发 20，首次较慢，5分钟内缓存复用）
   const candidates: FundWithNAV[] = [];
@@ -405,7 +401,7 @@ export async function runScreener(period: ScreenerPeriod = '1y'): Promise<Screen
             return { fund: { ...fund, name: detail.name || fund.name }, navData: detail.navHistory };
           }
         } catch { /* skip */ }
-        return { fund, navData: getMockNAV(fund.code) };
+        return { fund, navData: [] };
       }),
     );
     for (const r of results) {

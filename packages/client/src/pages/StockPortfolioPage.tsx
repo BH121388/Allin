@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useStockPortfolio } from '@/hooks/useStockPortfolio';
 import { RefreshCw, Briefcase, Plus, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -8,25 +8,54 @@ export default function StockPortfolioPage() {
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  // Form state
+  // Form state（只需填代码和金额，其余自动获取）
   const [formCode, setFormCode] = useState('');
-  const [formName, setFormName] = useState('');
   const [formAmount, setFormAmount] = useState('');
-  const [formPrice, setFormPrice] = useState('');
-  const [formShares, setFormShares] = useState('');
+  const amountRef = useRef(''); // 闭包穿透，handleCodeBlur 始终读到最新金额
+  const [formFetching, setFormFetching] = useState(false);
+  const [formPrice, setFormPrice] = useState<number | null>(null);
+  const [formName, setFormName] = useState('');
+
+  // 股数 = 金额 ÷ 价格，任一变化自动重算
+  const price = formPrice || 0;
+  const amt = parseFloat(formAmount) || 0;
+  const shares = price > 0 && amt > 0 ? Math.floor(amt / price / 100) * 100 : 0;
+  const actualAmount = shares * price;
+
+  // 输入代码后自动查询股票名称和实时价格
+  const handleCodeBlur = async () => {
+    const code = formCode.trim();
+    if (code.length !== 6 || !/^\d{6}$/.test(code)) return;
+    setFormFetching(true);
+    try {
+      const res = await fetch(`/api/stocks/search?code=${code}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setFormName(json.data.name);
+        setFormPrice(json.data.currentPrice || 0);
+      } else {
+        setFormName(''); setFormPrice(null);
+      }
+    } catch { setFormName(''); setFormPrice(null); }
+    setFormFetching(false);
+  };
 
   const handleAdd = async () => {
-    const amount = parseFloat(formAmount);
-    const price = parseFloat(formPrice);
-    const shares = parseInt(formShares, 10);
-    if (!formCode || !formName || isNaN(amount) || isNaN(price) || isNaN(shares)) return;
-
-    const ok = await addStock({ code: formCode, name: formName, amount, costPrice: price, shares });
+    if (!formCode || !formName || !formPrice || shares <= 0) return;
+    const ok = await addStock({
+      code: formCode,
+      name: formName,
+      amount: actualAmount,
+      costPrice: formPrice,
+      shares,
+    });
     if (ok) {
-      setFormCode(''); setFormName(''); setFormAmount(''); setFormPrice(''); setFormShares('');
-      setShowForm(false);
+      setFormCode(''); setFormAmount(''); setFormName(''); setFormPrice(null); setShowForm(false);
     }
   };
+
+  // 金额输入同步到 ref（handleCodeBlur 异步回来时读到最新值）
+  useEffect(() => { amountRef.current = formAmount; }, [formAmount]);
 
   const handleDelete = async (code: string) => {
     const ok = await removeStock(code);
@@ -70,39 +99,49 @@ export default function StockPortfolioPage() {
         </div>
       </div>
 
-      {/* Add form */}
+      {/* Add form — 简化为只填代码+金额 */}
       {showForm && (
         <div className="bg-white border border-slate-200 rounded-lg p-4 mb-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <input
-              type="text" placeholder="股票代码" value={formCode} onChange={e => setFormCode(e.target.value)}
-              maxLength={6} className="px-3 py-2 border border-slate-200 rounded text-sm"
-            />
-            <input
-              type="text" placeholder="股票名称" value={formName} onChange={e => setFormName(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded text-sm"
-            />
-            <input
-              type="number" placeholder="投入金额" value={formAmount} onChange={e => setFormAmount(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded text-sm"
-            />
-            <input
-              type="number" placeholder="成本价" value={formPrice} onChange={e => {
-                setFormPrice(e.target.value);
-                const amt = parseFloat(formAmount);
-                const p = parseFloat(e.target.value);
-                if (amt > 0 && p > 0) setFormShares(String(Math.floor(amt / p / 100) * 100));
-              }}
-              step="0.01" className="px-3 py-2 border border-slate-200 rounded text-sm"
-            />
-            <input
-              type="number" placeholder="股数" value={formShares} onChange={e => setFormShares(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded text-sm"
-            />
-            <button onClick={handleAdd} className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
-              确认添加
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[120px]">
+              <label className="text-xs text-slate-400 mb-1 block">股票代码</label>
+              <input
+                type="text" placeholder="如 600519" value={formCode}
+                onChange={e => setFormCode(e.target.value)}
+                onBlur={handleCodeBlur}
+                maxLength={6}
+                className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              />
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <label className="text-xs text-slate-400 mb-1 block">买入金额（元）</label>
+              <input
+                type="number" placeholder="如 10000" value={formAmount}
+                onChange={e => setFormAmount(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded text-sm"
+              />
+            </div>
+            <button onClick={handleAdd} disabled={!formName || !formPrice || shares <= 0 || formFetching}
+              className="px-6 py-2 bg-slate-800 text-white rounded text-sm hover:bg-slate-700 disabled:opacity-40 shrink-0">
+              {formFetching ? '查询中...' : '确认添加'}
             </button>
           </div>
+
+          {/* 自动查询预览 */}
+          {formFetching && (
+            <p className="text-xs text-slate-400 mt-2">正在查询股票信息...</p>
+          )}
+          {formName && formPrice && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 bg-slate-50 rounded-lg p-2">
+              <span>名称：<strong className="text-slate-700">{formName}</strong></span>
+              <span>实时价：<strong className="text-slate-700">¥{formPrice.toFixed(2)}</strong></span>
+              <span>股数：<strong className="text-slate-700">{shares}股</strong></span>
+              <span>成交金额：<strong className="text-slate-700">¥{actualAmount.toFixed(2)}</strong></span>
+            </div>
+          )}
+          {!formFetching && !formName && formCode.length === 6 && (
+            <p className="text-xs text-red-400 mt-2">未找到该股票，请检查代码</p>
+          )}
         </div>
       )}
 
@@ -175,19 +214,45 @@ export default function StockPortfolioPage() {
             </div>
           </div>
 
-          {/* Score bar & today */}
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>评分 {h.score.total}/100</span>
-            {(h.todayChange ?? 0) !== 0 && (
+          {/* Trading plan */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-xs">
+            {h.targetSellPrice && (
+              <div>
+                <span className="text-slate-400">目标卖价</span>
+                <p className="font-medium text-red-500">¥{h.targetSellPrice.toFixed(2)}</p>
+              </div>
+            )}
+            {h.stopLoss != null && (
+              <div>
+                <span className="text-slate-400">止损价</span>
+                <p className="font-medium text-green-600">¥{h.stopLoss.toFixed(2)}</p>
+              </div>
+            )}
+            <div>
+              <span className="text-slate-400">持仓天数</span>
+              <p className="font-medium text-slate-600">{h.holdingDays ?? '--'}天</p>
+            </div>
+            <div>
+              <span className="text-slate-400">评分</span>
+              <p className="font-medium text-slate-600">{h.score?.total ?? '--'}/100</p>
+            </div>
+          </div>
+
+          {/* Today change */}
+          <div className="flex items-center justify-between text-xs mb-2">
+            {(h.todayChange ?? 0) !== 0 ? (
               <span className={(h.todayChange ?? 0) >= 0 ? 'text-red-500' : 'text-green-500'}>
                 今日 {(h.todayChange ?? 0) >= 0 ? '+' : ''}{(h.todayChange ?? 0).toFixed(2)}% {h.todayPnl != null ? `(${(h.todayPnl ?? 0) >= 0 ? '+' : ''}${formatMoney(h.todayPnl ?? 0)})` : ''}
               </span>
-            )}
+            ) : <span />}
+            <span className="text-slate-400">
+              {h.signal?.signal === 'buy' ? '建议买入/加仓' : h.signal?.signal === 'hold' ? '建议持有' : h.signal?.signal === 'reduce' ? '建议减仓' : h.signal?.signal === 'sell' ? '建议清仓' : ''}
+            </span>
           </div>
 
           {/* Sell suggestion */}
           {h.sellSuggestion && (
-            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-1.5 text-xs text-amber-700 mb-2">
+            <div className={`rounded px-3 py-1.5 text-xs mb-2 ${h.signal?.signal === 'sell' || h.signal?.signal === 'reduce' ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
               {h.sellSuggestion}
             </div>
           )}
@@ -213,7 +278,7 @@ export default function StockPortfolioPage() {
 
 function SignalBadge({ signal }: { signal: string }) {
   const config: Record<string, { bg: string; text: string; label: string }> = {
-    buy:    { bg: 'bg-green-100', text: 'text-green-700', label: '买入' },
+    buy:    { bg: 'bg-red-100', text: 'text-red-700', label: '买入' },
     hold:   { bg: 'bg-blue-100',  text: 'text-blue-700',  label: '持有' },
     reduce: { bg: 'bg-amber-100', text: 'text-amber-700', label: '减持' },
     sell:   { bg: 'bg-red-100',   text: 'text-red-700',   label: '卖出' },

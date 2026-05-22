@@ -32,7 +32,7 @@ export default function HoldingCard({ holding, onRemove }: HoldingCardProps) {
   };
 
   const isPositive = holding.pnl >= 0;
-  const pnlColor = isPositive ? 'text-emerald-600' : 'text-red-600';
+  const pnlColor = isPositive ? 'text-red-600' : 'text-green-600';
 
   return (
     <>
@@ -72,12 +72,12 @@ export default function HoldingCard({ holding, onRemove }: HoldingCardProps) {
             <span className="text-muted-foreground">
               净值: <span className="text-slate-700 font-medium">{holding.currentNav}</span>
               {holding.navSource && (
-                <span className={cn('ml-1 text-xs px-1 py-0.5 rounded', holding.navSource === '官方净值' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600')}>
+                <span className={cn('ml-1 text-xs px-1 py-0.5 rounded', holding.navSource === '官方净值' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600')}>
                   {holding.navSource}
                 </span>
               )}
               {holding.todayChange != null && holding.todayChange !== 0 && (
-                <span className={cn('ml-1 text-xs', holding.todayChange >= 0 ? 'text-emerald-600' : 'text-red-500')}>
+                <span className={cn('ml-1 text-xs', holding.todayChange >= 0 ? 'text-red-600' : 'text-green-500')}>
                   {holding.todayChange >= 0 ? '+' : ''}{holding.todayChange}%
                 </span>
               )}
@@ -85,7 +85,7 @@ export default function HoldingCard({ holding, onRemove }: HoldingCardProps) {
             <span className={cn('font-medium', pnlColor)}>
               盈亏: {isPositive ? '+' : ''}{holding.pnlPercent}%
               {holding.todayPnl != null && holding.todayPnl !== 0 && (
-                <span className={cn('ml-1 text-xs font-normal', holding.todayPnl >= 0 ? 'text-emerald-600' : 'text-red-500')}>
+                <span className={cn('ml-1 text-xs font-normal', holding.todayPnl >= 0 ? 'text-red-600' : 'text-green-500')}>
                   今日{holding.todayPnl >= 0 ? '+' : ''}¥{holding.todayPnl.toLocaleString()}
                 </span>
               )}
@@ -106,9 +106,9 @@ export default function HoldingCard({ holding, onRemove }: HoldingCardProps) {
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',
-                  holding.score.total >= 70 ? 'bg-emerald-500' :
+                  holding.score.total >= 70 ? 'bg-red-500' :
                   holding.score.total >= 50 ? 'bg-amber-500' :
-                  'bg-red-400',
+                  'bg-green-500',
                 )}
                 style={{ width: `${holding.score.total}%` }}
               />
@@ -248,7 +248,7 @@ function TakeProfitSection({ code }: { code: string }) {
           'text-xs font-medium px-2 py-0.5 rounded-full',
           data.evaluation.shouldTakeProfit
             ? 'bg-amber-100 text-amber-700'
-            : 'bg-emerald-100 text-emerald-700',
+            : 'bg-blue-100 text-blue-700',
         )}>
           {data.evaluation.shouldTakeProfit ? '建议止盈' : '暂不止盈'}
         </span>

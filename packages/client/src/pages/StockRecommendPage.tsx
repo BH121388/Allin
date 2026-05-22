@@ -118,8 +118,8 @@ export default function StockRecommendPage() {
 }
 
 function StockRecommendCard({ stock, rank }: { stock: import('@allin/shared').StockAnalysis; rank: number }) {
-  const scoreColor = stock.score.total >= 80 ? 'text-green-600' : stock.score.total >= 65 ? 'text-blue-600' : stock.score.total >= 55 ? 'text-amber-600' : 'text-slate-600';
-  const signalBg = stock.signal.signal === 'buy' ? 'bg-green-100 text-green-700' : stock.signal.signal === 'hold' ? 'bg-blue-100 text-blue-700' : stock.signal.signal === 'reduce' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
+  const scoreColor = stock.score.total >= 80 ? 'text-red-600' : stock.score.total >= 65 ? 'text-blue-600' : stock.score.total >= 55 ? 'text-amber-600' : 'text-slate-600';
+  const signalBg = stock.signal.signal === 'buy' ? 'bg-red-100 text-red-700' : stock.signal.signal === 'hold' ? 'bg-blue-100 text-blue-700' : stock.signal.signal === 'reduce' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">

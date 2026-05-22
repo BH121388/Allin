@@ -490,15 +490,17 @@ export function calcOBV(prices: Array<{ close: number; volume?: number; dailyRet
 // ============================================================
 
 async function selfTest(): Promise<void> {
-  const { getMockFunds, getMockNAV } =
+  const { fetchAllFunds, fetchFundDetail } =
     await import('../adapters/eastmoney.js');
 
   console.log('========================================');
   console.log('[technical] 自测开始');
   console.log('========================================\n');
 
-  const fund = getMockFunds()[0]; // 易方达蓝筹精选混合
-  const nav = getMockNAV(fund.code);
+  const funds = await fetchAllFunds();
+  const fund = funds[0];
+  const detail = await fetchFundDetail(fund.code);
+  const nav = detail?.navHistory || [];
 
   console.log(`基金: ${fund.code} ${fund.name}`);
   console.log(`净值条目数: ${nav.length}`);
@@ -557,9 +559,10 @@ async function selfTest(): Promise<void> {
 
   // 再测 3 只不同基金的 RSI 值范围
   console.log('\n--- 多基金 RSI 对比 ---');
-  const funds = getMockFunds().slice(0, 5);
-  for (const f of funds) {
-    const navData = getMockNAV(f.code);
+  const fundList = (await fetchAllFunds()).slice(0, 5);
+  for (const f of fundList) {
+    const detail = await fetchFundDetail(f.code);
+    const navData = detail?.navHistory || [];
     const rsiVal = calcRSI(navData, 14);
     console.log(`  ${f.code} ${f.name.padEnd(24)} RSI(14): ${rsiVal}`);
   }

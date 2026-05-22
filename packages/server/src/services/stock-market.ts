@@ -97,16 +97,21 @@ async function fetchIndexQuotes(): Promise<IndexQuote[]> {
     const secids = MAJOR_INDICES.map(i => i.secid).join(',');
     const url = `http://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=f2,f3,f4,f12,f14,f104,f105`;
     const resp = await fetchWithTimeout(url);
-    if (!resp || !resp.ok) return getMockIndices();
+    if (!resp || !resp.ok) {
+      console.warn('[stock-market] 指数行情API请求失败');
+      return [];
+    }
 
     const body = await resp.json() as { data?: { diff?: Array<Record<string, unknown>> } };
-    if (!body.data?.diff) return getMockIndices();
+    if (!body.data?.diff || body.data.diff.length === 0) {
+      console.warn('[stock-market] 指数行情数据为空');
+      return [];
+    }
 
     return body.data.diff.map((item: Record<string, unknown>) => {
       const code = String(item.f12 || '');
       const idxInfo = MAJOR_INDICES.find(i => i.code === code);
       const rawPrice = Number(item.f2 || 0);
-      // 东方财富指数价格需除100
       const price = rawPrice > 10000 ? rawPrice / 100 : rawPrice;
       const rawChange = Number(item.f4 || 0);
       return {
@@ -119,78 +124,59 @@ async function fetchIndexQuotes(): Promise<IndexQuote[]> {
         downCount: Number(item.f105 || 0),
       };
     });
-  } catch {
-    return getMockIndices();
+  } catch (err) {
+    console.warn('[stock-market] 指数行情获取异常:', (err as Error).message);
+    return [];
   }
 }
 
-function getMockIndices(): IndexQuote[] {
-  return MAJOR_INDICES.map((i, idx) => ({
-    code: i.code,
-    name: i.name,
-    price: 3000 + idx * 500 + Math.random() * 100,
-    change: (Math.random() - 0.5) * 40,
-    changePct: Math.round((Math.random() - 0.45) * 200) / 100,
-    upCount: Math.floor(Math.random() * 2000),
-    downCount: Math.floor(Math.random() * 1500),
-  }));
-}
-
 // ============================================================
-// 板块表现（从全量股票聚合）
+// 板块表现（从东方财富 API 获取真实数据）
 // ============================================================
 
 async function getSectorPerformance(): Promise<{ all: SectorPerformance[]; top: SectorPerformance[]; bottom: SectorPerformance[] }> {
-  // 优先使用 MCP 真实板块数据
-  try {
-    const mcp = readMCPCache();
-    if (mcp.updatedAt && (mcp.topGainSectors.length > 0 || mcp.hotSectors.length > 0)) {
-      const sectors: SectorPerformance[] = [];
+  // 1. 优先使用东方财富行业板块 API（真实数据）
+  const realSectors = await fetchRealSectorData();
+  if (realSectors.length >= 10) {
+    const sorted = [...realSectors].sort((a, b) => b.changePct - a.changePct);
+    return {
+      all: sorted,
+      top: sorted.slice(0, 5),
+      bottom: sorted.slice(-5).reverse(),
+    };
+  }
 
-      // 从涨幅榜和跌幅榜构建板块列表
-      for (const name of mcp.topGainSectors) {
-        sectors.push({ name, changePct: 1.5, upCount: 0, downCount: 0, leadingStock: '--' });
-      }
-      for (const name of mcp.topLossSectors) {
-        sectors.push({ name, changePct: -5.5, upCount: 0, downCount: 0, leadingStock: '--' });
-      }
-      for (const name of mcp.hotSectors) {
-        if (!sectors.find(s => s.name === name)) {
-          sectors.push({ name, changePct: -0.5, upCount: 0, downCount: 0, leadingStock: '--' });
-        }
-      }
-
-      if (sectors.length >= 5) {
-        sectors.sort((a, b) => b.changePct - a.changePct);
-        return {
-          all: sectors,
-          top: sectors.filter(s => s.changePct > 0).slice(0, 5),
-          bottom: sectors.filter(s => s.changePct < 0).sort((a, b) => a.changePct - b.changePct).slice(0, 5),
-        };
-      }
-    }
-  } catch { /* fallback to stock aggregation */ }
-
-  // Fallback: 从全量股票聚合
-  return getFallbackSectors();
+  // 2. API失败则返回空（不再虚构数据）
+  console.warn('[stock-market] 板块数据获取失败，返回空列表');
+  return { all: [], top: [], bottom: [] };
 }
 
-async function getFallbackSectors(): Promise<{ all: SectorPerformance[]; top: SectorPerformance[]; bottom: SectorPerformance[] }> {
-  const names = ['通信', '电子', '计算机', '电力设备', '医药生物', '汽车', '机械设备', '国防军工', '食品饮料', '家用电器', '银行', '非银金融', '房地产', '煤炭', '钢铁', '有色金属', '基础化工', '公用事业', '交通运输', '传媒', '商贸零售', '农林牧渔', '建筑材料'];
-  const mcp = readMCPCache();
-  const sectors: SectorPerformance[] = names.map(n => {
-    const isHot = mcp.hotSectors?.some(h => n.includes(h) || h.includes(n));
-    const isTop = mcp.topGainSectors?.some(h => n.includes(h) || h.includes(n));
-    const isBottom = mcp.topLossSectors?.some(h => n.includes(h) || h.includes(n));
-    let changePct: number;
-    if (isTop) changePct = 1.2;
-    else if (isBottom) changePct = -4.5;
-    else if (isHot) changePct = 0.3;
-    else changePct = Math.round((Math.random() - 0.6) * 500) / 100;
-    return { name: n, changePct, upCount: Math.floor(Math.random() * 30) + 5, downCount: Math.floor(Math.random() * 20), leadingStock: '--' };
-  });
-  sectors.sort((a, b) => b.changePct - a.changePct);
-  return { all: sectors, top: sectors.slice(0, 5), bottom: sectors.slice(-5).reverse() };
+/** 从东方财富获取行业板块实时行情 */
+async function fetchRealSectorData(): Promise<SectorPerformance[]> {
+  try {
+    // 东方财富行业板块 API
+    const url = 'http://push2.eastmoney.com/api/qt/clist/get?' +
+      'pn=1&pz=50&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&' +
+      'fields=f2,f3,f4,f12,f14,f104,f105,f128';
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const resp = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!resp || !resp.ok) return [];
+
+    const body = await resp.json() as { data?: { diff?: Array<Record<string, unknown>> } };
+    if (!body.data?.diff) return [];
+
+    return body.data.diff.map((item: Record<string, unknown>) => ({
+      name: String(item.f14 || ''),
+      changePct: Math.round(Number(item.f3 || 0) * 100) / 100,
+      upCount: Number(item.f104 || 0),
+      downCount: Number(item.f105 || 0),
+      leadingStock: String(item.f128 || '--'),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 // ============================================================
@@ -198,31 +184,21 @@ async function getFallbackSectors(): Promise<{ all: SectorPerformance[]; top: Se
 // ============================================================
 
 function getMarketBreadth(): MarketBreadth {
-  // 优先使用 MCP 真实数据
-  try {
-    const mcp = readMCPCache();
-    if (mcp.updatedAt && mcp.upCount > 0) {
-      const total = mcp.upCount + mcp.downCount;
-      return {
-        totalStocks: total || 5467,
-        upCount: mcp.upCount,
-        downCount: mcp.downCount,
-        flatCount: Math.max(0, 5467 - total),
-        limitUp: 36,
-        limitDown: 65,
-        upPct: total > 0 ? Math.round((mcp.upCount / total) * 10000) / 100 : 12,
-      };
-    }
-  } catch { /* fallback */ }
-
-  const total = 5200;
-  const up = Math.floor(Math.random() * 2000) + 800;
-  const down = total - up - Math.floor(Math.random() * 500);
-  return {
-    totalStocks: total, upCount: up, downCount: down, flatCount: total - up - down,
-    limitUp: Math.floor(Math.random() * 60), limitDown: Math.floor(Math.random() * 30),
-    upPct: Math.round((up / total) * 10000) / 100,
-  };
+  const mcp = readMCPCache();
+  if (mcp.updatedAt && mcp.upCount > 0) {
+    const total = mcp.upCount + mcp.downCount;
+    return {
+      totalStocks: total || 5467,
+      upCount: mcp.upCount,
+      downCount: mcp.downCount,
+      flatCount: Math.max(0, 5467 - total),
+      limitUp: 0,
+      limitDown: 0,
+      upPct: total > 0 ? Math.round((mcp.upCount / total) * 10000) / 100 : 0,
+    };
+  }
+  // MCP 缓存为空时返回 0 值而不是随机数
+  return { totalStocks: 0, upCount: 0, downCount: 0, flatCount: 0, limitUp: 0, limitDown: 0, upPct: 0 };
 }
 
 // ============================================================
@@ -256,7 +232,7 @@ function getHotStocks(): Array<{ code: string; name: string; changePct: number; 
     if (candidates) {
       for (const c of candidates) {
         if (!stocks.find(s => s.code === c.code)) {
-          stocks.push({ ...c, changePct: Math.round((Math.random() * 4 + 0.5) * 100) / 100 });
+          stocks.push({ ...c, changePct: 0 });
         }
       }
     }
@@ -273,7 +249,7 @@ function getHotStocks(): Array<{ code: string; name: string; changePct: number; 
     ];
     for (const d of defaults) {
       if (!stocks.find(s => s.code === d.code)) {
-        stocks.push({ ...d, changePct: Math.round((Math.random() * 5 + 0.5) * 100) / 100 });
+        stocks.push({ ...d, changePct: 0 });
       }
     }
   }

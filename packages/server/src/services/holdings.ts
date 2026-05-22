@@ -249,21 +249,10 @@ export function generateHoldings(fund: FundInfo): HoldingsDetail {
   const holdings: TopHolding[] = [];
   const totalWeight = template.reduce((sum, t) => sum + t.baseWeight, 0);
 
-  // 为每只股票生成今日涨跌幅（确定性随机，基于股票代码）
+  // 涨跌幅留空（由调用方通过实时行情API填充）
   for (const stock of template) {
-    const stockSeed = hashCode(stock.code);
-    const stockRng = createRNG(stockSeed);
-
-    // 涨跌幅: 正态分布 × 2.5（使大部分值在 ±5% 内），四舍五入到 2 位小数
-    let change = rngNormal(stockRng) * 2.5;
-    // 限制在 [-5, +5]
-    change = Math.max(-5, Math.min(5, change));
-    change = Math.round(change * 100) / 100;
-
-    // 权重: baseWeight 基础上 ±1.5% 扰动
-    const weightOffset = (stockRng() - 0.5) * 3.0;
-    let weight = Math.round((stock.baseWeight + weightOffset) * 100) / 100;
-    weight = Math.max(0.5, weight); // 最小值 0.5%
+    const change = 0; // 真实涨跌幅由上层实时获取
+    let weight = stock.baseWeight;
 
     holdings.push({
       stockCode: stock.code,

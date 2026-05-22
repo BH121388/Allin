@@ -10,8 +10,8 @@ const SIGNAL_CONFIG = {
   buy: {
     label: '买入',
     icon: TrendingUp,
-    bg: 'bg-emerald-100',
-    text: 'text-emerald-700',
+    bg: 'bg-red-100',
+    text: 'text-red-700',
   },
   hold: {
     label: '持有',

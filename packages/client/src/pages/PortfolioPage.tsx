@@ -24,7 +24,7 @@ export default function PortfolioPage() {
   };
 
   const isPositive = (summary?.totalPnl ?? 0) >= 0;
-  const pnlColor = isPositive ? 'text-emerald-600' : 'text-red-600';
+  const pnlColor = isPositive ? 'text-red-600' : 'text-green-600';
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-4 sm:space-y-6">
@@ -145,12 +145,12 @@ export default function PortfolioPage() {
                   <CardContent className="pt-4 pb-4 flex items-center gap-3">
                     <div className={cn(
                       'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                      isPositive ? 'bg-emerald-100' : 'bg-red-100',
+                      isPositive ? 'bg-red-100' : 'bg-green-100',
                     )}>
                       {isPositive ? (
-                        <TrendingUp className="w-5 h-5 text-emerald-600" />
+                        <TrendingUp className="w-5 h-5 text-red-600" />
                       ) : (
-                        <TrendingDown className="w-5 h-5 text-red-600" />
+                        <TrendingDown className="w-5 h-5 text-green-600" />
                       )}
                     </div>
                     <div>

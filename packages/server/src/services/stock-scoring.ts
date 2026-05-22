@@ -170,10 +170,8 @@ export function scoreStock(stock: StockInfo, klines: StockKLine[]): StockScore {
   // 6. 行业景气匹配 (0-10)
   const sectorMatch = scoreSectorMatch(stock);
 
-  const total = clamp(
-    momentum + riskControl + riskAdjusted + companyQuality + valuation + sectorMatch,
-    0, 100,
-  );
+  const sum = momentum + riskControl + riskAdjusted + companyQuality + valuation + sectorMatch;
+  const total = isNaN(sum) ? 30 : clamp(sum, 0, 100);
 
   return {
     momentum: clamp(momentum, 0, 25),
@@ -192,14 +190,14 @@ export function scoreStock(stock: StockInfo, klines: StockKLine[]): StockScore {
 
 function scoreCompanyQuality(stock: StockInfo): number {
   const Q = QUALITY_REF;
-  // ROE 占 6 分
-  const roeScore = normFixed(stock.roe, Q.roe.min, Q.roe.max) * 6;
-  // 盈利增速 占 5 分
-  const profitScore = normFixed(stock.profitGrowth, Q.profitGrowth.min, Q.profitGrowth.max) * 5;
-  // 净利率 占 4 分
-  const marginScore = normFixed(stock.netProfitMargin, Q.netMargin.min, Q.netMargin.max) * 4;
-
-  return Math.round(roeScore + profitScore + marginScore);
+  const roe = typeof stock.roe === 'number' && !isNaN(stock.roe) ? stock.roe : 0;
+  const profitGrowth = typeof stock.profitGrowth === 'number' && !isNaN(stock.profitGrowth) ? stock.profitGrowth : 0;
+  const netMargin = typeof stock.netProfitMargin === 'number' && !isNaN(stock.netProfitMargin) ? stock.netProfitMargin : 0;
+  const roeScore = normFixed(roe, Q.roe.min, Q.roe.max) * 6;
+  const profitScore = normFixed(profitGrowth, Q.profitGrowth.min, Q.profitGrowth.max) * 5;
+  const marginScore = normFixed(netMargin, Q.netMargin.min, Q.netMargin.max) * 4;
+  const result = Math.round(roeScore + profitScore + marginScore);
+  return isNaN(result) ? 3 : result; // 数据缺失时给中性分
 }
 
 // ============================================================
@@ -263,8 +261,7 @@ function scoreSectorMatch(stock: StockInfo): number {
   };
 
   const base = HOT_SECTORS[stock.industry] ?? 5;
-  const jitter = (hashCode(stock.code + stock.industry) % 3) - 1; // -1, 0, 1
-  return clamp(base + jitter, 0, 10);
+  return clamp(base, 0, 10);
 }
 
 // ============================================================

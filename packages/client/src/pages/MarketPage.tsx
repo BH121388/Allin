@@ -21,7 +21,6 @@ function fmtInflow(n: number): string {
 function Skeleton() {
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-6 animate-pulse">
-      {/* Header skeleton */}
       <div className="flex items-center justify-between">
         <div>
           <div className="h-7 w-32 bg-slate-200 rounded" />
@@ -29,11 +28,7 @@ function Skeleton() {
         </div>
         <div className="h-9 w-20 bg-slate-200 rounded-lg" />
       </div>
-
-      {/* Hot sectors skeleton */}
       <div className="h-16 bg-slate-200 rounded-xl" />
-
-      {/* Table skeleton */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <div className="h-5 w-24 bg-slate-200 rounded mb-4" />
         <div className="space-y-3">
@@ -42,16 +37,12 @@ function Skeleton() {
           ))}
         </div>
       </div>
-
-      {/* Events skeleton */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
         <div className="h-5 w-24 bg-slate-200 rounded" />
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="h-20 bg-slate-200 rounded" />
         ))}
       </div>
-
-      {/* Opportunities skeleton */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="h-40 bg-slate-200 rounded-xl" />
         <div className="h-40 bg-slate-200 rounded-xl" />
@@ -80,7 +71,10 @@ function HotSectorsBar({ sectors }: { sectors: SectorInfo[] }) {
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200"
             >
               {s.name}
-              <span className="text-emerald-600 text-xs font-semibold">
+              <span className={cn(
+                "text-xs font-semibold",
+                s.changePercent >= 0 ? 'text-red-600' : 'text-green-600',
+              )}>
                 {fmtPct(s.changePercent)}
               </span>
             </span>
@@ -135,8 +129,6 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                 const isTop5 = topGainerNames.has(sector.name);
                 const isBottom5 = topLoserNames.has(sector.name);
                 const isHot = hotNames.has(sector.name);
-
-                // Determine ratio display
                 const ratioStr = `${sector.upCount}/${sector.downCount}`;
 
                 return (
@@ -144,8 +136,9 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                     key={sector.name}
                     className={cn(
                       'border-b border-slate-100 hover:bg-slate-50 transition-colors',
-                      isTop5 && 'bg-emerald-50/60 hover:bg-emerald-50',
-                      isBottom5 && 'bg-red-50/60 hover:bg-red-50',
+                      // 涨=红底，跌=绿底
+                      isTop5 && 'bg-red-50/60 hover:bg-red-50',
+                      isBottom5 && 'bg-green-50/60 hover:bg-green-50',
                     )}
                   >
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">
@@ -162,7 +155,8 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                     <td
                       className={cn(
                         'px-3 py-2.5 text-right font-mono text-xs font-semibold',
-                        sector.changePercent >= 0 ? 'text-emerald-600' : 'text-red-600',
+                        // 涨=红，跌=绿
+                        sector.changePercent >= 0 ? 'text-red-600' : 'text-green-600',
                       )}
                     >
                       {fmtPct(sector.changePercent)}
@@ -170,7 +164,7 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                     <td
                       className={cn(
                         'px-3 py-2.5 text-right font-mono text-xs',
-                        sector.change5d >= 0 ? 'text-emerald-600' : 'text-red-600',
+                        sector.change5d >= 0 ? 'text-red-600' : 'text-green-600',
                       )}
                     >
                       {fmtPct(sector.change5d)}
@@ -178,7 +172,8 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                     <td
                       className={cn(
                         'px-3 py-2.5 text-right font-mono text-xs',
-                        sector.netInflow >= 0 ? 'text-emerald-600' : 'text-red-600',
+                        // 流入=红，流出=绿
+                        sector.netInflow >= 0 ? 'text-red-600' : 'text-green-600',
                       )}
                     >
                       {fmtInflow(sector.netInflow)}
@@ -194,7 +189,8 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
                         <span
                           className={cn(
                             'inline-flex items-center justify-center w-5 h-5 rounded-full text-xs',
-                            isTop5 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600',
+                            // 领涨=红，领跌=绿
+                            isTop5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600',
                           )}
                           title={isTop5 ? '领涨板块' : '领跌板块'}
                         >
@@ -218,7 +214,7 @@ function SectorTable({ allSectors, topGainers, topLosers, hotSectors }: {
 }
 
 // ============================================================
-// Event severity config
+// Event severity config (unchanged — severity ≠ direction)
 // ============================================================
 
 const SEVERITY_CONFIG: Record<MarketEvent['severity'], {
@@ -310,7 +306,8 @@ function NewsEvents({ events }: { events: MarketEvent[] }) {
                         {event.bullishSectors.map((s) => (
                           <span
                             key={`bull-${s}`}
-                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700"
+                            // 利好=红
+                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700"
                           >
                             <TrendingUp className="w-3 h-3" />
                             {s}
@@ -319,7 +316,8 @@ function NewsEvents({ events }: { events: MarketEvent[] }) {
                         {event.bearishSectors.map((s) => (
                           <span
                             key={`bear-${s}`}
-                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700"
+                            // 利空=绿
+                            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700"
                           >
                             <TrendingDown className="w-3 h-3" />
                             {s}
@@ -347,7 +345,6 @@ function MarketImpact({ events, topGainers, topLosers }: {
   topGainers: SectorInfo[];
   topLosers: SectorInfo[];
 }) {
-  // Collect unique bullish/bearish sectors from events
   const bullishFromEvents = new Set<string>();
   const bearishFromEvents = new Set<string>();
   for (const event of events) {
@@ -364,9 +361,9 @@ function MarketImpact({ events, topGainers, topLosers }: {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Bullish */}
+          {/* 利好板块 = 红 */}
           <div>
-            <h4 className="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1">
+            <h4 className="text-xs font-semibold text-red-700 mb-2 flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5" />
               利好板块
             </h4>
@@ -377,11 +374,11 @@ function MarketImpact({ events, topGainers, topLosers }: {
                   return (
                     <span
                       key={s}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200"
                     >
                       {s}
                       {sector && (
-                        <span className="text-emerald-500 text-[10px]">
+                        <span className="text-red-500 text-[10px]">
                           {fmtPct(sector.changePercent)}
                         </span>
                       )}
@@ -394,9 +391,9 @@ function MarketImpact({ events, topGainers, topLosers }: {
             </div>
           </div>
 
-          {/* Bearish */}
+          {/* 承压板块 = 绿 */}
           <div>
-            <h4 className="text-xs font-semibold text-red-700 mb-2 flex items-center gap-1">
+            <h4 className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
               <TrendingDown className="w-3.5 h-3.5" />
               承压板块
             </h4>
@@ -407,11 +404,11 @@ function MarketImpact({ events, topGainers, topLosers }: {
                   return (
                     <span
                       key={s}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200"
                     >
                       {s}
                       {sector && (
-                        <span className="text-red-500 text-[10px]">
+                        <span className="text-green-500 text-[10px]">
                           {fmtPct(sector.changePercent)}
                         </span>
                       )}
@@ -439,7 +436,7 @@ function OpportunityPanels({ opportunities, risks }: {
 }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {/* Opportunities */}
+      {/* 机会 = 红 */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2 mb-4">
@@ -450,7 +447,7 @@ function OpportunityPanels({ opportunities, risks }: {
             <ol className="space-y-2">
               {opportunities.map((opp, idx) => (
                 <li key={idx} className="flex gap-2">
-                  <span className="text-xs font-bold text-emerald-500 mt-0.5 shrink-0">
+                  <span className="text-xs font-bold text-red-500 mt-0.5 shrink-0">
                     {idx + 1}.
                   </span>
                   <p className="text-xs text-slate-700 leading-relaxed">{opp}</p>
@@ -463,7 +460,7 @@ function OpportunityPanels({ opportunities, risks }: {
         </CardContent>
       </Card>
 
-      {/* Risks */}
+      {/* 风险 = 绿 */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2 mb-4">
@@ -474,7 +471,7 @@ function OpportunityPanels({ opportunities, risks }: {
             <ul className="space-y-2">
               {risks.map((risk, idx) => (
                 <li key={idx} className="flex gap-2">
-                  <span className="text-xs text-red-500 mt-0.5 shrink-0">!</span>
+                  <span className="text-xs text-green-500 mt-0.5 shrink-0">!</span>
                   <p className="text-xs text-slate-700 leading-relaxed">{risk}</p>
                 </li>
               ))}
@@ -495,12 +492,10 @@ function OpportunityPanels({ opportunities, risks }: {
 export default function MarketPage() {
   const { data, loading, error, refresh } = useMarket();
 
-  // Loading state with skeleton
   if (loading && !data) {
     return <Skeleton />;
   }
 
-  // Error state
   if (error && !data) {
     return (
       <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
@@ -516,7 +511,6 @@ export default function MarketPage() {
     );
   }
 
-  // No data
   if (!data) {
     return (
       <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
